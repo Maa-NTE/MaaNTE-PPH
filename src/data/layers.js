@@ -28,8 +28,8 @@ const OFFICE_ROTATED_X90_FLIPPED_XZ_TRANSFORM = {
 export const MAP_LAYERS = [
   {
     id: 'lobby',
-    name: '大厅',
-    subtitle: '粉爪总部 · 主楼层',
+    name: 'F1 大厅',
+    subtitle: '',
     imageUrl: '/maps/lobby.png',
     image: {
       width: 4096,
@@ -66,8 +66,8 @@ export const MAP_LAYERS = [
   },
   {
     id: 'lobby-lower',
-    name: '大厅下楼',
-    subtitle: '粉爪总部 · 下层',
+    name: 'G0 大厅下楼',
+    subtitle: '',
     imageUrl: '/maps/lobby-lower.png',
     image: {
       width: 4096,
@@ -105,7 +105,7 @@ export const MAP_LAYERS = [
   {
     id: 'g1-office',
     name: 'G1 办公层',
-    subtitle: '办公区 · x0 + x1',
+    subtitle: '',
     imageUrl: '/maps/g1-office.png',
     image: {
       width: 8192,
@@ -159,7 +159,7 @@ export const MAP_LAYERS = [
   {
     id: 'g1-office-w2',
     name: 'G1 办公层 W2',
-    subtitle: '办公区 · w2 · x0 + x1',
+    subtitle: '',
     imageUrl: '/maps/g1-office-w2.png',
     image: {
       width: 8192,
@@ -200,8 +200,8 @@ export const MAP_LAYERS = [
   },
   {
     id: 'g1-office-w2-left',
-    name: 'G1 Office W2 Left',
-    subtitle: 'office area / w2 left / x0 z0',
+    name: 'G1 办公层 W2 左侧区域',
+    subtitle: '',
     imageUrl: '/maps/g1-office-w2-left.png',
     image: {
       width: 4096,
@@ -242,8 +242,8 @@ export const MAP_LAYERS = [
   },
   {
     id: 'g1-office-w2-right',
-    name: 'G1 Office W2 Right',
-    subtitle: 'office area / w2 right / z0 + z1',
+    name: 'G1 办公层 W2 右侧区域',
+    subtitle: '',
     imageUrl: '/maps/g1-office-w2-right.png',
     image: {
       width: 4096,
@@ -289,8 +289,8 @@ export const MAP_LAYERS = [
   },
   {
     id: 'g1-office-w2-left-small-room',
-    name: 'G1 Office W2 Left Small Room',
-    subtitle: 'office room / w2 left small',
+    name: 'G1 办公层 W2 左侧房间',
+    subtitle: '',
     imageUrl: '/maps/g1-office-w2-left-small-room.png',
     image: {
       width: 4096,
@@ -331,8 +331,8 @@ export const MAP_LAYERS = [
   },
   {
     id: 'g1-office-w2-right-small-room',
-    name: 'G1 Office W2 Right Small Room',
-    subtitle: 'office room / w2 right small',
+    name: 'G1 办公层 W2 右侧房间',
+    subtitle: '',
     imageUrl: '/maps/g1-office-w2-right-small-room.png',
     image: {
       width: 4096,
@@ -373,8 +373,8 @@ export const MAP_LAYERS = [
   },
   {
     id: 'g1-office-w3',
-    name: 'G1 Office W3',
-    subtitle: 'office area / w3 / x0 + x1',
+    name: 'G1 办公层 W3',
+    subtitle: '',
     imageUrl: '/maps/g1-office-w3.png',
     image: {
       width: 8192,
@@ -415,8 +415,8 @@ export const MAP_LAYERS = [
   },
   {
     id: 'g1-office-w4',
-    name: 'G1 Office W4',
-    subtitle: 'office area / w4',
+    name: 'G1 办公层 W4',
+    subtitle: '',
     imageUrl: '/maps/g1-office-w4.png',
     image: {
       width: 4096,
@@ -465,8 +465,8 @@ export const MAP_LAYERS = [
   },
   {
     id: 'g1-office-left-room',
-    name: 'G1 Office Left Room',
-    subtitle: 'office room / left',
+    name: 'G1 办公层 W1 左侧房间',
+    subtitle: '',
     imageUrl: '/maps/g1-office-left-room.png',
     image: {
       width: 4096,
@@ -507,8 +507,8 @@ export const MAP_LAYERS = [
   },
   {
     id: 'g1-office-lower-right-small-room',
-    name: 'G1 Office Lower Right Small Room',
-    subtitle: 'office room / lower right small',
+    name: 'G1 办公层 W1 右侧房间',
+    subtitle: '',
     imageUrl: '/maps/g1-office-lower-right-small-room.png',
     image: {
       width: 4096,
@@ -549,8 +549,8 @@ export const MAP_LAYERS = [
   },
   {
     id: 'g1-manager-side-room',
-    name: 'G1 Manager Side Room',
-    subtitle: 'office room / manager side',
+    name: 'G1 经理办公室 左侧房间',
+    subtitle: '',
     imageUrl: '/maps/g1-manager-side-room.png',
     image: {
       width: 4096,
@@ -582,8 +582,8 @@ export const MAP_LAYERS = [
   },
   {
     id: 'g2-floor-1',
-    name: 'G2 一层',
-    subtitle: 'G2 / floor 1 / x0-x2 + z0-z1',
+    name: 'G2 藏品层 一层',
+    subtitle: '',
     imageUrl: '/maps/g2-floor-1.png',
     image: {
       width: 12288,
@@ -646,8 +646,8 @@ export const MAP_LAYERS = [
   },
   {
     id: 'g2-floor-2',
-    name: 'G2 二层',
-    subtitle: 'G2 / floor 2 / x0-x1 + z0-z1',
+    name: 'G2 藏品层 二层',
+    subtitle: '',
     imageUrl: '/maps/g2-floor-2.png',
     image: {
       width: 8192,
@@ -688,8 +688,8 @@ export const MAP_LAYERS = [
   },
   {
     id: 'vault',
-    name: '金库',
-    subtitle: 'vault / x0-x1 + z0-z1',
+    name: 'G3 金库层',
+    subtitle: '',
     imageUrl: '/maps/vault.png',
     image: {
       width: 8192,
@@ -731,7 +731,7 @@ export const MAP_LAYERS = [
   {
     id: 'all-maps-overview',
     name: '全地图总览',
-    subtitle: 'composite / debug layout',
+    subtitle: '',
     image: {
       width: 65536,
       height: 65536,
