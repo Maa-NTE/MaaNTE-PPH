@@ -94,6 +94,8 @@ const activeGeofenceStatus = computed(() => {
 })
 const ROUTES_STORAGE_KEY = 'pph-routes'
 const pointer = ref({ pixelX: 0, pixelY: 0, x: 0, y: 0 })
+const sidebarOpen = ref(true)
+const routePanelOpen = ref(false)
 const routeEditMode = ref(false)
 const routeStatus = ref(null)
 const routes = ref(readStoredRoutes())
@@ -2626,11 +2628,27 @@ onUnmounted(() => {
         <small>{{ activeLayer.subtitle }}</small>
       </div>
       <div class="toolbar topbar-tools">
+        <button
+          type="button"
+          :class="{ 'toolbar-button--active': routePanelOpen }"
+          @click="routePanelOpen = !routePanelOpen"
+        >
+          路线
+        </button>
         <button type="button" @click="resetView">重置视野</button>
       </div>
     </header>
 
-    <aside class="sidebar glass-panel">
+    <button
+      type="button"
+      class="sidebar-toggle glass-panel"
+      :class="{ 'sidebar-toggle--open': sidebarOpen }"
+      @click="sidebarOpen = !sidebarOpen"
+    >
+      {{ sidebarOpen ? '‹' : '›' }}
+    </button>
+
+    <aside class="sidebar glass-panel" :class="{ 'sidebar--collapsed': !sidebarOpen }">
       <section>
         <p class="eyebrow">MAP LAYERS</p>
         <h2>楼层 / 区域</h2>
@@ -3025,7 +3043,7 @@ onUnmounted(() => {
       </section>
     </aside>
 
-    <div class="right-panel-stack">
+    <div v-if="routePanelOpen" class="right-panel-stack">
       <aside class="route-panel glass-panel">
         <div class="section-heading">
           <div>

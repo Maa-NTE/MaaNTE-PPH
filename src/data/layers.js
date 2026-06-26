@@ -28,7 +28,7 @@ const OFFICE_ROTATED_X90_FLIPPED_XZ_TRANSFORM = {
 export const MAP_LAYERS = [
   {
     id: 'lobby',
-    name: 'F1 大厅',
+    name: 'G-接待大厅',
     subtitle: '',
     imageUrl: '/maps/lobby.png',
     image: {
@@ -66,7 +66,7 @@ export const MAP_LAYERS = [
   },
   {
     id: 'lobby-lower',
-    name: 'G0 大厅下楼',
+    name: 'G-接待大厅 楼下',
     subtitle: '',
     imageUrl: '/maps/lobby-lower.png',
     image: {
@@ -104,7 +104,7 @@ export const MAP_LAYERS = [
   },
   {
     id: 'g1-office',
-    name: 'G1 办公层',
+    name: 'LG1-办公层 W1',
     subtitle: '',
     imageUrl: '/maps/g1-office.png',
     image: {
@@ -158,7 +158,7 @@ export const MAP_LAYERS = [
   },
   {
     id: 'g1-office-w2',
-    name: 'G1 办公层 W2',
+    name: 'LG1-办公层 W2',
     subtitle: '',
     imageUrl: '/maps/g1-office-w2.png',
     image: {
@@ -200,7 +200,7 @@ export const MAP_LAYERS = [
   },
   {
     id: 'g1-office-w2-left',
-    name: 'G1 办公层 W2 左侧区域',
+    name: 'LG1-办公层 W2 左侧区域',
     subtitle: '',
     imageUrl: '/maps/g1-office-w2-left.png',
     image: {
@@ -242,7 +242,7 @@ export const MAP_LAYERS = [
   },
   {
     id: 'g1-office-w2-right',
-    name: 'G1 办公层 W2 右侧区域',
+    name: 'LG1-办公层 W2 右侧区域',
     subtitle: '',
     imageUrl: '/maps/g1-office-w2-right.png',
     image: {
@@ -289,7 +289,7 @@ export const MAP_LAYERS = [
   },
   {
     id: 'g1-office-w2-left-small-room',
-    name: 'G1 办公层 W2 左侧房间',
+    name: 'LG1-办公层 W2 左侧房间',
     subtitle: '',
     imageUrl: '/maps/g1-office-w2-left-small-room.png',
     image: {
@@ -331,7 +331,7 @@ export const MAP_LAYERS = [
   },
   {
     id: 'g1-office-w2-right-small-room',
-    name: 'G1 办公层 W2 右侧房间',
+    name: 'LG1-办公层 W2 右侧房间',
     subtitle: '',
     imageUrl: '/maps/g1-office-w2-right-small-room.png',
     image: {
@@ -373,7 +373,7 @@ export const MAP_LAYERS = [
   },
   {
     id: 'g1-office-w3',
-    name: 'G1 办公层 W3',
+    name: 'LG1-办公层 W3',
     subtitle: '',
     imageUrl: '/maps/g1-office-w3.png',
     image: {
@@ -415,7 +415,7 @@ export const MAP_LAYERS = [
   },
   {
     id: 'g1-office-w4',
-    name: 'G1 办公层 W4',
+    name: 'LG1-办公层 W4',
     subtitle: '',
     imageUrl: '/maps/g1-office-w4.png',
     image: {
@@ -465,7 +465,7 @@ export const MAP_LAYERS = [
   },
   {
     id: 'g1-office-left-room',
-    name: 'G1 办公层 W1 左侧房间',
+    name: 'LG1-办公层 W1 左侧房间',
     subtitle: '',
     imageUrl: '/maps/g1-office-left-room.png',
     image: {
@@ -507,7 +507,7 @@ export const MAP_LAYERS = [
   },
   {
     id: 'g1-office-lower-right-small-room',
-    name: 'G1 办公层 W1 右侧房间',
+    name: 'LG1-办公层 W1 右侧房间',
     subtitle: '',
     imageUrl: '/maps/g1-office-lower-right-small-room.png',
     image: {
@@ -549,7 +549,7 @@ export const MAP_LAYERS = [
   },
   {
     id: 'g1-manager-side-room',
-    name: 'G1 经理办公室 左侧房间',
+    name: 'LG1-经理办公室 左侧房间',
     subtitle: '',
     imageUrl: '/maps/g1-manager-side-room.png',
     image: {
@@ -582,7 +582,7 @@ export const MAP_LAYERS = [
   },
   {
     id: 'g2-floor-1',
-    name: 'G2 藏品层 一层',
+    name: 'LG2-藏品层 一层',
     subtitle: '',
     imageUrl: '/maps/g2-floor-1.png',
     image: {
@@ -646,7 +646,7 @@ export const MAP_LAYERS = [
   },
   {
     id: 'g2-floor-2',
-    name: 'G2 藏品层 二层',
+    name: 'LG2-藏品层 二层',
     subtitle: '',
     imageUrl: '/maps/g2-floor-2.png',
     image: {
@@ -688,7 +688,7 @@ export const MAP_LAYERS = [
   },
   {
     id: 'vault',
-    name: 'G3 金库层',
+    name: 'LG3-金库层',
     subtitle: '',
     imageUrl: '/maps/vault.png',
     image: {
@@ -760,12 +760,12 @@ export const MAP_LAYERS = [
         { layerId: 'vault', x: 21520, y: -8648 },
       ],
       markers: [
-        { id: 'mmqubz99p', label: '前往G1', type: 'portal', layerId: 'lobby-lower', x: 2064, y: 1408 },
+        { id: 'mmqubz99p', label: '前往W1', type: 'portal', layerId: 'lobby-lower', x: 2064, y: 1408 },
         { id: 'mmquca68s', label: '前往大厅', type: 'portal', layerId: 'g1-office', x: 4440, y: 3980 },
         { id: 'mmquz6jk7', label: '蓝色传送门', type: 'portal', layerId: 'g1-office-left-room', x: 3664, y: 1960 },
         { id: 'mmquz88i6', label: '前往W2', type: 'portal', layerId: 'g1-office', x: 2198, y: 1520 },
         { id: 'mmquzb2ny', label: '前往W2', type: 'portal', layerId: 'g1-office', x: 6694, y: 1537 },
-        { id: 'mmquzcf4y', label: '前往G1', type: 'portal', layerId: 'g1-office-w2', x: 4110, y: 3201 },
+        { id: 'mmquzcf4y', label: '前往W1', type: 'portal', layerId: 'g1-office-w2', x: 4110, y: 3201 },
         { id: 'mmquzfwju', label: '蓝色传送门', type: 'portal', layerId: 'g1-office', x: 443, y: 1010 },
         { id: 'mmquzgdcu', label: '蓝色传送门', type: 'portal', layerId: 'g1-office', x: 7072, y: 3108 },
         { id: 'mmquzhtk5', label: '蓝色传送门', type: 'portal', layerId: 'g1-office-lower-right-small-room', x: 992, y: 640 },
