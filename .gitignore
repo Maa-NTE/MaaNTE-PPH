@@ -1,0 +1,5 @@
+node_modules/
+dist/
+*.log
+public/maps-origin
+public/process.py
