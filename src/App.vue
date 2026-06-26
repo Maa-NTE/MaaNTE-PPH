@@ -1,7 +1,7 @@
 ﻿<script setup>
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import L from 'leaflet'
-import { DEFAULT_LAYER_ID, MAP_LAYERS } from './data/layers'
+import { MAP_LAYERS } from './data/layers'
 import {
   applyLayerAngleOffset,
   createLayerCoordinateMapper,
@@ -24,8 +24,12 @@ const MAP_TILE_SIZE = 256
 const MAP_TILE_MIN_ZOOM = -8
 const MAP_TILE_MAX_NATIVE_ZOOM = 0
 const OVERVIEW_LAYER_ID = 'all-maps-overview'
-const activeLayerId = ref(localStorage.getItem('pph-active-layer') || DEFAULT_LAYER_ID)
-const activeLayer = computed(() => MAP_LAYERS.find((layer) => layer.id === activeLayerId.value) || MAP_LAYERS[0])
+const activeLayerId = ref(readInitialActiveLayerId())
+const activeLayer = computed(() =>
+  MAP_LAYERS.find((layer) => layer.id === activeLayerId.value)
+  || MAP_LAYERS.find((layer) => layer.id === OVERVIEW_LAYER_ID)
+  || MAP_LAYERS[0],
+)
 const overviewLayer = computed(() => MAP_LAYERS.find((layer) => layer.id === OVERVIEW_LAYER_ID) || null)
 const calibrationOverrides = ref(isDevelopment ? readCalibrationOverrides() : {})
 const geofenceOverrides = ref(isDevelopment ? readGeofenceOverrides() : {})
@@ -74,6 +78,8 @@ const MARKER_TYPES = [
 const HIDDEN_COMPOSITE_MARKER_TYPES_STORAGE_KEY = 'pph-hidden-composite-marker-types'
 const HIDDEN_COMPOSITE_MARKER_IDS_STORAGE_KEY = 'pph-hidden-composite-marker-ids'
 const SHOWN_COMPOSITE_MARKER_IDS_STORAGE_KEY = 'pph-shown-composite-marker-ids'
+const SIDEBAR_OPEN_STORAGE_KEY = 'pph-sidebar-open'
+const ROUTE_PANEL_OPEN_STORAGE_KEY = 'pph-route-panel-open'
 const COMPOSITE_MARKER_ICON_SIZE = { width: 54, height: 38 }
 const COMPOSITE_EDGE_ARROW_TIP_OFFSET = 11
 const COMPOSITE_EDGE_ARROW_LENGTH = 24
@@ -94,8 +100,8 @@ const activeGeofenceStatus = computed(() => {
 })
 const ROUTES_STORAGE_KEY = 'pph-routes'
 const pointer = ref({ pixelX: 0, pixelY: 0, x: 0, y: 0 })
-const sidebarOpen = ref(true)
-const routePanelOpen = ref(false)
+const sidebarOpen = ref(readStoredBoolean(SIDEBAR_OPEN_STORAGE_KEY, true))
+const routePanelOpen = ref(readStoredBoolean(ROUTE_PANEL_OPEN_STORAGE_KEY, false))
 const routeEditMode = ref(false)
 const routeStatus = ref(null)
 const routes = ref(readStoredRoutes())
@@ -215,6 +221,21 @@ let annotationBaseZoom = null
 let mapImageRenderToken = 0
 let compositeAnnotationFrame = null
 const mapTileImageCache = new Map()
+
+function readInitialActiveLayerId() {
+  const storedLayerId = localStorage.getItem('pph-active-layer')
+  if (storedLayerId && MAP_LAYERS.some((layer) => layer.id === storedLayerId)) return storedLayerId
+  return MAP_LAYERS.some((layer) => layer.id === OVERVIEW_LAYER_ID)
+    ? OVERVIEW_LAYER_ID
+    : MAP_LAYERS[0]?.id
+}
+
+function readStoredBoolean(storageKey, fallback) {
+  const value = localStorage.getItem(storageKey)
+  if (value === 'true') return true
+  if (value === 'false') return false
+  return fallback
+}
 
 function createTransformForm(value = {}) {
   const mirrorPlanes = Array.isArray(value?.mirrorPlanes) ? value.mirrorPlanes : []
@@ -2500,11 +2521,15 @@ function connectSocket() {
 
 function applyEndpoint() {
   navigationPort.value = normalizeNavigationPort(navigationPort.value)
-  localStorage.setItem('pph-websocket-url', navigationUrl.value)
+  persistNavigationEndpoint()
   if (realtimeEnabled.value) {
     disconnectSocket()
     connectSocket()
   }
+}
+
+function persistNavigationEndpoint() {
+  localStorage.setItem('pph-websocket-url', navigationUrl.value)
 }
 
 async function changeLayer(id, { preserveNavigation = false, manual = false } = {}) {
@@ -2547,6 +2572,9 @@ watch(realtimeEnabled, (enabled) => {
   else disconnectSocket()
 })
 watch(followEnabled, (enabled) => localStorage.setItem('pph-follow-enabled', String(enabled)))
+watch([navigationProtocol, navigationHost, navigationPort], persistNavigationEndpoint)
+watch(sidebarOpen, (open) => localStorage.setItem(SIDEBAR_OPEN_STORAGE_KEY, String(open)))
+watch(routePanelOpen, (open) => localStorage.setItem(ROUTE_PANEL_OPEN_STORAGE_KEY, String(open)))
 watch(areaLayerListOpen, (open) => localStorage.setItem('pph-area-layer-list-open', String(open)))
 watch(compositeConnectionDirection, (direction) => localStorage.setItem('pph-composite-connection-direction', direction))
 watch(hiddenCompositeMarkerTypes, (visibility) => {
