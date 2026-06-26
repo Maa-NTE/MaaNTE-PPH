@@ -1,6 +1,9 @@
 node_modules/
 dist/
 *.log
+.pnpm-store/
+pnpm-lock.yaml
+pnpm-workspace.yaml
 public/maps-origin
 public/process.py
 maps-source/

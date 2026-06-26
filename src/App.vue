@@ -187,11 +187,7 @@ const canSendRoute = computed(() =>
   && Boolean(activeRoute.value)
   && activeRoute.value.segments.some((segment) => !segment.isHidden && getSegmentPoints(segment).some(isRoutePointOnActiveLayer)),
 )
-const hudGamePosition = computed(() => latestGamePosition.value || {
-  x: pointer.value.x,
-  y: pointer.value.y,
-  z: null,
-})
+const hudGamePosition = computed(() => latestGamePosition.value)
 const activePlaneAxes = computed(() => ({
   xoy: ['X', 'Y'],
   yoz: ['Y', 'Z'],
@@ -3155,9 +3151,9 @@ onUnmounted(() => {
     <div class="map-hud glass-panel">
       <span class="game-coordinate">
         当前位置 XYZ
-        {{ hudGamePosition.x.toFixed(0) }},
-        {{ hudGamePosition.y.toFixed(0) }},
-        {{ Number.isFinite(hudGamePosition.z) ? hudGamePosition.z.toFixed(0) : '--' }}
+        {{ Number.isFinite(hudGamePosition?.x) ? hudGamePosition.x.toFixed(0) : '--' }},
+        {{ Number.isFinite(hudGamePosition?.y) ? hudGamePosition.y.toFixed(0) : '--' }},
+        {{ Number.isFinite(hudGamePosition?.z) ? hudGamePosition.z.toFixed(0) : '--' }}
       </span>
       <span>
         鼠标指向 XY
