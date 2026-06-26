@@ -54,7 +54,8 @@ button:disabled { cursor: default; opacity: 0.42; }
     linear-gradient(rgba(0,0,0,.2), transparent 18%, transparent 82%, rgba(0,0,0,.22));
 }
 
-.leaflet-image-layer {
+.leaflet-image-layer,
+.map-image-tile {
   filter: saturate(.72) brightness(.78) contrast(1.08);
 }
 
@@ -1113,6 +1114,28 @@ h2 { margin-bottom: 0; font-size: 17px; }
   will-change: transform;
   user-select: none;
   -webkit-user-drag: none;
+}
+
+.map-image-tile {
+  pointer-events: none;
+  user-select: none;
+}
+
+.map-image-tile--interactive {
+  pointer-events: auto;
+}
+
+.app-shell--composite-marking .map-image-tile--interactive {
+  cursor: crosshair;
+}
+
+.map-image-tile--moveable {
+  cursor: grab;
+}
+
+.map-image-tile--dragging,
+.app-shell .map-image-tile--interactive:active {
+  cursor: grabbing;
 }
 
 .composite-map-image--editable {

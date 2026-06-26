@@ -6,9 +6,15 @@ import { fileURLToPath, URL } from 'node:url'
 
 const LAYERS_FILE = fileURLToPath(new URL('./src/data/layers.js', import.meta.url))
 const MAPS_DIR = fileURLToPath(new URL('./public/maps', import.meta.url))
+const MAP_TILES_MANIFEST = fileURLToPath(new URL('./public/map-tiles/manifest.json', import.meta.url))
 
 function computeMapAssetVersion() {
   try {
+    if (fs.existsSync(MAP_TILES_MANIFEST)) {
+      const manifest = JSON.parse(fs.readFileSync(MAP_TILES_MANIFEST, 'utf8'))
+      if (manifest?.version) return String(manifest.version)
+    }
+
     const files = fs.readdirSync(MAPS_DIR, { withFileTypes: true })
     const signature = files
       .filter((entry) => entry.isFile())

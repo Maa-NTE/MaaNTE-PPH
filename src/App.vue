@@ -20,8 +20,9 @@ const mapElement = ref(null)
 const isDevelopment = import.meta.env.DEV
 const LOGO_URL = '/images/logo.png'
 const MAP_ASSET_VERSION = __MAP_ASSET_VERSION__
-const MAP_IMAGE_LOAD_TIMEOUT_MS = 12000
-const COMPOSITE_IMAGE_LOAD_CONCURRENCY = 2
+const MAP_TILE_SIZE = 256
+const MAP_TILE_MIN_ZOOM = -8
+const MAP_TILE_MAX_NATIVE_ZOOM = 0
 const OVERVIEW_LAYER_ID = 'all-maps-overview'
 const activeLayerId = ref(localStorage.getItem('pph-active-layer') || DEFAULT_LAYER_ID)
 const activeLayer = computed(() => MAP_LAYERS.find((layer) => layer.id === activeLayerId.value) || MAP_LAYERS[0])
@@ -192,7 +193,7 @@ const latestPlanePosition = computed(() =>
 )
 
 let map
-let imageOverlay
+let imageTileLayer
 let compositeImageLayer
 let compositeMarkerLayer
 let routeLayer
@@ -211,7 +212,7 @@ let suppressTransformPersist = false
 let annotationBaseZoom = null
 let mapImageRenderToken = 0
 let compositeAnnotationFrame = null
-const mapImageUrlCache = new Map()
+const mapTileImageCache = new Map()
 
 function createTransformForm(value = {}) {
   const mirrorPlanes = Array.isArray(value?.mirrorPlanes) ? value.mirrorPlanes : []
@@ -938,91 +939,6 @@ function compositeItemBounds(item) {
   }
 }
 
-function versionedMapImageUrl(imageUrl, retryNonce = '') {
-  const hashIndex = String(imageUrl).indexOf('#')
-  const baseUrl = hashIndex >= 0 ? String(imageUrl).slice(0, hashIndex) : String(imageUrl)
-  const hash = hashIndex >= 0 ? String(imageUrl).slice(hashIndex) : ''
-  const separator = baseUrl.includes('?') ? '&' : '?'
-  const retryParam = retryNonce ? `&retry=${encodeURIComponent(retryNonce)}` : ''
-  return `${baseUrl}${separator}v=${encodeURIComponent(MAP_ASSET_VERSION)}${retryParam}${hash}`
-}
-
-function preloadImage(imageUrl) {
-  return new Promise((resolve, reject) => {
-    const image = new Image()
-    let settled = false
-    const timeout = window.setTimeout(() => {
-      finish(() => reject(new Error(`Image load timed out: ${imageUrl}`)))
-    }, MAP_IMAGE_LOAD_TIMEOUT_MS)
-
-    function finish(callback) {
-      if (settled) return
-      settled = true
-      window.clearTimeout(timeout)
-      image.onload = null
-      image.onerror = null
-      callback()
-    }
-
-    image.decoding = 'async'
-    image.loading = 'eager'
-    image.onload = () => {
-      const decode = typeof image.decode === 'function'
-        ? image.decode()
-        : Promise.resolve()
-      decode.then(
-        () => finish(() => resolve(imageUrl)),
-        (error) => finish(() => reject(error)),
-      )
-    }
-    image.onerror = () => finish(() => reject(new Error(`Image load failed: ${imageUrl}`)))
-    image.src = imageUrl
-  })
-}
-
-async function resolveMapImageUrl(imageUrl, { bypassCache = false } = {}) {
-  const cacheKey = `${imageUrl}:${MAP_ASSET_VERSION}`
-  if (!bypassCache && mapImageUrlCache.has(cacheKey)) {
-    return mapImageUrlCache.get(cacheKey)
-  }
-
-  const loadPromise = (async () => {
-    const primaryUrl = versionedMapImageUrl(imageUrl)
-    try {
-      await preloadImage(primaryUrl)
-      return primaryUrl
-    } catch {
-      const retryUrl = versionedMapImageUrl(imageUrl, `${Date.now()}-${Math.random().toString(36).slice(2)}`)
-      await preloadImage(retryUrl)
-      return retryUrl
-    }
-  })()
-
-  if (!bypassCache) mapImageUrlCache.set(cacheKey, loadPromise)
-
-  try {
-    return await loadPromise
-  } catch (error) {
-    if (!bypassCache) mapImageUrlCache.delete(cacheKey)
-    throw error
-  }
-}
-
-function attachMapOverlayLoadHandlers(overlay, originalImageUrl, token) {
-  overlay.once('load', () => {
-    overlay.getElement()?.classList.add('map-image-ready')
-  })
-  overlay.once('error', async () => {
-    if (token !== mapImageRenderToken) return
-    try {
-      const retryUrl = await resolveMapImageUrl(originalImageUrl, { bypassCache: true })
-      if (token === mapImageRenderToken) overlay.setUrl(retryUrl)
-    } catch {
-      if (token === mapImageRenderToken) showStatus('地图图片加载失败，请刷新页面重试')
-    }
-  })
-}
-
 function sortedCompositeImageEntries() {
   let center = null
   try {
@@ -1046,39 +962,161 @@ function sortedCompositeImageEntries() {
     })
 }
 
-async function renderSingleMapImage(token) {
-  if (!map || token !== mapImageRenderToken || isCompositeLayer.value) return
-  imageOverlay = L.imageOverlay(versionedMapImageUrl(activeLayer.value.imageUrl), layerBounds())
-  attachMapOverlayLoadHandlers(imageOverlay, activeLayer.value.imageUrl, token)
-  imageOverlay.addTo(map)
-  imageOverlay.bringToBack()
-  if (token === mapImageRenderToken) renderCompositeAnnotations()
+function versionedMapTileUrl(layerId, z, x, y) {
+  return `/map-tiles/${encodeURIComponent(layerId)}/${z}/${x}/${y}.webp?v=${encodeURIComponent(MAP_ASSET_VERSION)}`
 }
 
-async function renderCompositeMapImages(token) {
-  const entries = sortedCompositeImageEntries()
-  let nextIndex = 0
+function loadMapTileImage(url) {
+  if (mapTileImageCache.has(url)) return mapTileImageCache.get(url)
+  const promise = new Promise((resolve) => {
+    const image = new Image()
+    image.decoding = 'async'
+    image.onload = () => resolve(image)
+    image.onerror = () => resolve(null)
+    image.src = url
+  })
+  mapTileImageCache.set(url, promise)
+  return promise
+}
 
-  async function worker() {
-    while (token === mapImageRenderToken && nextIndex < entries.length) {
-      const entry = entries[nextIndex]
-      nextIndex += 1
-      if (!map || token !== mapImageRenderToken || !compositeImageLayer) continue
-      const overlay = L.imageOverlay(versionedMapImageUrl(entry.resolved.layer.imageUrl), entry.resolved.bounds, {
-        interactive: true,
-        pane: 'compositeImagePane',
-      })
-      attachMapOverlayLoadHandlers(overlay, entry.resolved.layer.imageUrl, token)
-      overlay.addTo(compositeImageLayer)
-      makeCompositeOverlayInteractive(overlay, entry.item, entry.resolved.layer)
-      await new Promise((resolve) => window.requestAnimationFrame(resolve))
+function clampTileZoom(zoom) {
+  return Math.max(MAP_TILE_MIN_ZOOM, Math.min(MAP_TILE_MAX_NATIVE_ZOOM, Number(zoom) || 0))
+}
+
+async function drawSourceTilesToCanvas(canvas, sourceLayer, offsetX, offsetY, coords) {
+  const tileSize = MAP_TILE_SIZE
+  const z = clampTileZoom(coords.z)
+  const scale = 2 ** z
+  const tileMapX = coords.x * tileSize / scale
+  const tileMapY = coords.y * tileSize / scale
+  const tileMapWidth = tileSize / scale
+  const tileMapHeight = tileSize / scale
+  const imageWidth = sourceLayer.image.width
+  const imageHeight = sourceLayer.image.height
+  const imageLeft = offsetX
+  const imageTop = offsetY
+  const imageRight = imageLeft + imageWidth
+  const imageBottom = imageTop + imageHeight
+  const overlapLeft = Math.max(tileMapX, imageLeft)
+  const overlapTop = Math.max(tileMapY, imageTop)
+  const overlapRight = Math.min(tileMapX + tileMapWidth, imageRight)
+  const overlapBottom = Math.min(tileMapY + tileMapHeight, imageBottom)
+  if (overlapLeft >= overlapRight || overlapTop >= overlapBottom) return
+
+  const sourceLeft = (overlapLeft - imageLeft) * scale
+  const sourceTop = (overlapTop - imageTop) * scale
+  const sourceRight = (overlapRight - imageLeft) * scale
+  const sourceBottom = (overlapBottom - imageTop) * scale
+  const firstSourceTileX = Math.floor(sourceLeft / tileSize)
+  const firstSourceTileY = Math.floor(sourceTop / tileSize)
+  const lastSourceTileX = Math.floor((sourceRight - 0.001) / tileSize)
+  const lastSourceTileY = Math.floor((sourceBottom - 0.001) / tileSize)
+  const context = canvas.getContext('2d')
+  context.imageSmoothingEnabled = z !== 0
+  context.imageSmoothingQuality = 'high'
+
+  const drawTasks = []
+  for (let sourceTileY = firstSourceTileY; sourceTileY <= lastSourceTileY; sourceTileY += 1) {
+    for (let sourceTileX = firstSourceTileX; sourceTileX <= lastSourceTileX; sourceTileX += 1) {
+      drawTasks.push((async () => {
+        const image = await loadMapTileImage(versionedMapTileUrl(sourceLayer.id, z, sourceTileX, sourceTileY))
+        if (!image) return
+        const sourceTileLeft = sourceTileX * tileSize
+        const sourceTileTop = sourceTileY * tileSize
+        const cropLeft = Math.max(sourceLeft, sourceTileLeft)
+        const cropTop = Math.max(sourceTop, sourceTileTop)
+        const cropRight = Math.min(sourceRight, sourceTileLeft + tileSize)
+        const cropBottom = Math.min(sourceBottom, sourceTileTop + tileSize)
+        if (cropLeft >= cropRight || cropTop >= cropBottom) return
+        const cropWidth = cropRight - cropLeft
+        const cropHeight = cropBottom - cropTop
+        const destX = cropLeft + (imageLeft - tileMapX) * scale
+        const destY = cropTop + (imageTop - tileMapY) * scale
+        context.drawImage(
+          image,
+          cropLeft - sourceTileLeft,
+          cropTop - sourceTileTop,
+          cropWidth,
+          cropHeight,
+          destX,
+          destY,
+          cropWidth,
+          cropHeight,
+        )
+      })())
     }
   }
 
-  await Promise.all(Array.from(
-    { length: Math.min(COMPOSITE_IMAGE_LOAD_CONCURRENCY, entries.length) },
-    () => worker(),
-  ))
+  await Promise.all(drawTasks)
+}
+
+const MapImageTileLayer = L.GridLayer.extend({
+  createTile(coords, done) {
+    const canvas = L.DomUtil.create('canvas', 'map-image-tile')
+    canvas.width = MAP_TILE_SIZE
+    canvas.height = MAP_TILE_SIZE
+    const { sourceLayer, item, interactive } = this.options
+    if (interactive) {
+      canvas.classList.add('map-image-tile--interactive')
+      canvas.classList.toggle('map-image-tile--moveable', compositeItemDragMode.value)
+      L.DomEvent.on(canvas, 'click', (event) => {
+        if (!compositeMarkerMode.value || !map) return
+        L.DomEvent.stop(event)
+        addCompositeMarker(map.mouseEventToLatLng(event))
+      })
+      L.DomEvent.on(canvas, 'mousedown', (event) => beginCompositeItemDrag(event, item, sourceLayer, this, canvas))
+    }
+    drawSourceTilesToCanvas(
+      canvas,
+      sourceLayer,
+      Number(item?.x) || 0,
+      Number(item?.y) || 0,
+      coords,
+    ).then(
+      () => done(null, canvas),
+      () => done(null, canvas),
+    )
+    return canvas
+  },
+})
+
+function createMapTileLayer(layer, item = { x: 0, y: 0 }, options = {}) {
+  const bounds = L.latLngBounds(
+    [-(Number(item.y || 0) + layer.image.height), Number(item.x || 0)],
+    [-Number(item.y || 0), Number(item.x || 0) + layer.image.width],
+  )
+  return new MapImageTileLayer({
+    sourceLayer: layer,
+    item,
+    bounds,
+    tileSize: MAP_TILE_SIZE,
+    minNativeZoom: MAP_TILE_MIN_ZOOM,
+    maxNativeZoom: MAP_TILE_MAX_NATIVE_ZOOM,
+    minZoom: MAP_TILE_MIN_ZOOM,
+    maxZoom: 2,
+    noWrap: true,
+    keepBuffer: 2,
+    updateWhenIdle: false,
+    updateWhenZooming: false,
+    ...options,
+  })
+}
+
+function renderSingleMapImage(token) {
+  if (!map || token !== mapImageRenderToken || isCompositeLayer.value) return
+  imageTileLayer = createMapTileLayer(activeLayer.value).addTo(map)
+  if (token === mapImageRenderToken) renderCompositeAnnotations()
+}
+
+function renderCompositeMapImages(token) {
+  sortedCompositeImageEntries().forEach((entry) => {
+    if (!map || token !== mapImageRenderToken || !compositeImageLayer) return
+    const layer = createMapTileLayer(entry.resolved.layer, entry.item, {
+      interactive: true,
+      pane: 'compositeImagePane',
+    })
+    layer.addTo(compositeImageLayer)
+  })
 }
 
 function scheduleCompositeAnnotationsRender() {
@@ -1114,8 +1152,8 @@ function getCompositeHit(latlng) {
 function renderMapImages() {
   if (!map) return
   const token = ++mapImageRenderToken
-  imageOverlay?.remove()
-  imageOverlay = null
+  imageTileLayer?.remove()
+  imageTileLayer = null
   compositeImageLayer?.remove()
   compositeImageLayer = null
   compositeMarkerLayer?.remove()
@@ -1124,31 +1162,14 @@ function renderMapImages() {
   if (isCompositeLayer.value) {
     compositeImageLayer = L.layerGroup().addTo(map)
     renderCompositeAnnotations()
-    void renderCompositeMapImages(token)
+    renderCompositeMapImages(token)
     return
   }
 
-  void renderSingleMapImage(token)
+  renderSingleMapImage(token)
 }
 
-function makeCompositeOverlayInteractive(overlay, item, layer) {
-  const element = overlay.getElement()
-  if (!element) return
-  element.alt = layer.name
-  element.draggable = false
-  element.classList.add('composite-map-image')
-  element.classList.toggle('composite-map-image--editable', compositeMarkerMode.value || compositeItemDragMode.value)
-  element.classList.toggle('composite-map-image--moveable', compositeItemDragMode.value)
-
-  L.DomEvent.on(element, 'click', (event) => {
-    if (!compositeMarkerMode.value) return
-    L.DomEvent.stop(event)
-    addCompositeMarker(map.mouseEventToLatLng(event))
-  })
-  L.DomEvent.on(element, 'mousedown', (event) => beginCompositeItemDrag(event, item, layer, overlay, element))
-}
-
-function beginCompositeItemDrag(event, item, layer, overlay, element) {
+function beginCompositeItemDrag(event, item, layer, tileLayer, element) {
   if (!isDevelopment || !isCompositeLayer.value || !compositeItemDragMode.value || !map) return
   L.DomEvent.stop(event)
   const startLatLng = map.mouseEventToLatLng(event)
@@ -1156,23 +1177,27 @@ function beginCompositeItemDrag(event, item, layer, overlay, element) {
   const startY = Number(item.y) || 0
   let nextX = startX
   let nextY = startY
-  element.classList.add('composite-map-image--dragging')
+  element.classList.add('map-image-tile--dragging')
   map.dragging.disable()
 
   const move = (moveEvent) => {
     const latlng = map.mouseEventToLatLng(moveEvent)
     nextX = startX + latlng.lng - startLatLng.lng
     nextY = startY - (latlng.lat - startLatLng.lat)
-    overlay.setBounds(L.latLngBounds(
+    item.x = nextX
+    item.y = nextY
+    tileLayer.options.bounds = L.latLngBounds(
       [-(nextY + layer.image.height), nextX],
       [-nextY, nextX + layer.image.width],
-    ))
+    )
+    tileLayer.redraw()
+    renderCompositeAnnotations()
   }
 
   const end = () => {
     L.DomEvent.off(document, 'mousemove', move)
     L.DomEvent.off(document, 'mouseup', end)
-    element.classList.remove('composite-map-image--dragging')
+    element.classList.remove('map-image-tile--dragging')
     map.dragging.enable()
     updateCompositeItemPosition(item.layerId, nextX, nextY)
     showStatus(`${layer.name} 位置已更新：${Math.round(nextX)}, ${Math.round(nextY)}`)

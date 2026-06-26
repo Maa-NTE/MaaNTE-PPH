@@ -1,0 +1,30 @@
+{
+  "version": "07a0c07daa00",
+  "tileSize": 256,
+  "minZoom": -8,
+  "maxZoom": 0,
+  "tileFormat": "webp",
+  "webpQuality": 92,
+  "webpMethod": 0,
+  "webpLossless": false,
+  "generatedAt": "2026-06-26T18:14:32.936550+00:00",
+  "layers": [
+    "lobby",
+    "lobby-lower",
+    "g1-office",
+    "g1-office-w2",
+    "g1-office-w2-left",
+    "g1-office-w2-right",
+    "g1-office-w2-left-small-room",
+    "g1-office-w2-right-small-room",
+    "g1-office-w3",
+    "g1-office-w4",
+    "g1-office-left-room",
+    "g1-office-lower-right-small-room",
+    "g1-manager-side-room",
+    "g2-floor-1",
+    "g2-floor-2",
+    "vault"
+  ],
+  "totalTiles": 10636
+}
