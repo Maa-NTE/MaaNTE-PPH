@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "vite --configLoader runner --host 127.0.0.1 --port 31777",
     "build:tiles": "python scripts/build-map-tiles.py",
-    "build": "python scripts/build-map-tiles.py && vite build --configLoader runner",
+    "build": "vite build --configLoader runner",
     "preview": "vite preview --configLoader runner --host 127.0.0.1"
   },
   "dependencies": {
