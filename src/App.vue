@@ -23,6 +23,7 @@ const MAP_ASSET_VERSION = __MAP_ASSET_VERSION__
 const MAP_TILE_SIZE = 256
 const MAP_TILE_MIN_ZOOM = -8
 const MAP_TILE_MAX_NATIVE_ZOOM = 0
+const MAP_ZOOM_DELTA = 0.25
 const OVERVIEW_LAYER_ID = 'all-maps-overview'
 const OVERVIEW_DEFAULT_ZOOM_OFFSET = 1
 const activeLayerId = ref(readInitialActiveLayerId())
@@ -2601,6 +2602,8 @@ onMounted(() => {
     crs: L.CRS.Simple,
     minZoom: -8,
     maxZoom: 2,
+    zoomSnap: 0,
+    zoomDelta: MAP_ZOOM_DELTA,
     zoomControl: false,
     attributionControl: false,
     maxBoundsViscosity: 0.8,
