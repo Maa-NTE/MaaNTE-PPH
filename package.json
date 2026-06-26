@@ -5,8 +5,8 @@
   "type": "module",
   "scripts": {
     "dev": "vite --configLoader runner --host 127.0.0.1 --port 31777",
-    "build:tiles": "powershell -ExecutionPolicy Bypass -File scripts/build-map-tiles.ps1",
-    "build": "powershell -ExecutionPolicy Bypass -File scripts/build-map-tiles.ps1 && vite build --configLoader runner",
+    "build:tiles": "python scripts/build-map-tiles.py",
+    "build": "python scripts/build-map-tiles.py && vite build --configLoader runner",
     "preview": "vite preview --configLoader runner --host 127.0.0.1"
   },
   "dependencies": {
