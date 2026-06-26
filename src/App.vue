@@ -24,6 +24,7 @@ const MAP_TILE_SIZE = 256
 const MAP_TILE_MIN_ZOOM = -8
 const MAP_TILE_MAX_NATIVE_ZOOM = 0
 const OVERVIEW_LAYER_ID = 'all-maps-overview'
+const OVERVIEW_DEFAULT_ZOOM_OFFSET = 1
 const activeLayerId = ref(readInitialActiveLayerId())
 const activeLayer = computed(() =>
   MAP_LAYERS.find((layer) => layer.id === activeLayerId.value)
@@ -1880,7 +1881,11 @@ function renderGeofence() {
 }
 
 function resetView() {
-  map?.fitBounds(activeViewBounds(), { padding: [30, 30], animate: false })
+  if (!map) return
+  map.fitBounds(activeViewBounds(), { padding: [30, 30], animate: false })
+  if (activeLayerId.value === OVERVIEW_LAYER_ID) {
+    map.setZoom(Math.min(map.getMaxZoom(), map.getZoom() + OVERVIEW_DEFAULT_ZOOM_OFFSET), { animate: false })
+  }
   resetAnnotationScaleBase()
   renderCompositeAnnotations()
 }
@@ -2655,8 +2660,8 @@ onUnmounted(() => {
       <div class="brand-block topbar-brand">
         <div class="brand-mark"><img :src="LOGO_URL" alt="PPH" /></div>
         <div>
-          <p class="eyebrow">MaaNTE Map</p>
-          <h1>粉爪大劫案在线地图</h1>
+          <p class="eyebrow">MaaNTE PinkPawHeist Map</p>
+          <h1>MaaNTE粉爪大劫案在线地图</h1>
         </div>
       </div>
       <div class="topbar-layer">
@@ -2686,7 +2691,7 @@ onUnmounted(() => {
     </button>
 
     <aside class="sidebar glass-panel" :class="{ 'sidebar--collapsed': !sidebarOpen }">
-      <section>
+      <section class="sidebar-main">
         <p class="eyebrow">MAP LAYERS</p>
         <h2>楼层 / 区域</h2>
         <div class="layer-list">
@@ -3064,19 +3069,19 @@ onUnmounted(() => {
             <i />
           </label>
         </div>
-        <label class="setting-row">
+        <label v-if="realtimeEnabled" class="setting-row">
           <span><b>箭头保持居中</b><small>接收位置后自动跟随</small></span>
           <span class="switch setting-row-switch">
             <input v-model="followEnabled" type="checkbox" />
             <i />
           </span>
         </label>
-        <div class="endpoint-fields">
+        <div v-if="realtimeEnabled" class="endpoint-fields">
           <label><span>协议</span><select v-model="navigationProtocol" @change="applyEndpoint"><option>ws</option><option>wss</option></select></label>
           <label><span>IP</span><input v-model.trim="navigationHost" @change="applyEndpoint" /></label>
           <label><span>端口</span><input v-model.trim="navigationPort" type="number" min="1" max="65535" @change="applyEndpoint" /></label>
         </div>
-        <code>{{ navigationUrl }}</code>
+        <code v-if="realtimeEnabled">{{ navigationUrl }}</code>
       </section>
     </aside>
 
@@ -3159,6 +3164,7 @@ onUnmounted(() => {
         {{ pointer.x.toFixed(0) }},
         {{ pointer.y.toFixed(0) }}
       </span>
+      <span class="navigation-status" :class="`navigation-status--${connection}`">NAVI {{ connectionLabel }}</span>
     </div>
 
     <div v-if="statusMessage" class="toast glass-panel">{{ statusMessage }}</div>
