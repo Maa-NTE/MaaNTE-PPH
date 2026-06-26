@@ -50,6 +50,9 @@ const displayLayers = computed(() => [
   ...MAP_LAYERS.filter((layer) => layer.id === OVERVIEW_LAYER_ID),
   ...MAP_LAYERS.filter((layer) => layer.id !== OVERVIEW_LAYER_ID),
 ])
+const overviewDisplayLayers = computed(() => displayLayers.value.filter((layer) => layer.id === OVERVIEW_LAYER_ID))
+const areaDisplayLayers = computed(() => displayLayers.value.filter((layer) => layer.id !== OVERVIEW_LAYER_ID))
+const areaLayerListOpen = ref(localStorage.getItem('pph-area-layer-list-open') === 'true')
 const activeComposite = computed(() =>
   compositeLayoutOverrides.value[activeLayer.value.id] || activeLayer.value.composite || { items: [] },
 )
@@ -64,9 +67,12 @@ const activeCompositeMarkers = computed(() => overviewComposite.value.markers ||
 const activeCompositeEdges = computed(() => overviewComposite.value.edges || [])
 const MARKER_TYPES = [
   { id: 'portal', label: '传送门', shortLabel: '门', color: '#b8fff2' },
-  { id: 'extraction', label: '撤离点', shortLabel: '撤', color: '#ffe0a6' },
-  { id: 'special-room', label: '特殊房间', shortLabel: '房', color: '#ff9fc0' },
+  { id: 'extraction', label: '撤离点', shortLabel: '撤', color: '#ff5a5f' },
+  { id: 'special-room', label: '特殊房间', shortLabel: '特', color: '#ffd84d' },
 ]
+const HIDDEN_COMPOSITE_MARKER_TYPES_STORAGE_KEY = 'pph-hidden-composite-marker-types'
+const HIDDEN_COMPOSITE_MARKER_IDS_STORAGE_KEY = 'pph-hidden-composite-marker-ids'
+const SHOWN_COMPOSITE_MARKER_IDS_STORAGE_KEY = 'pph-shown-composite-marker-ids'
 const COMPOSITE_MARKER_ICON_SIZE = { width: 54, height: 38 }
 const COMPOSITE_EDGE_ARROW_TIP_OFFSET = 11
 const COMPOSITE_EDGE_ARROW_LENGTH = 24
@@ -74,6 +80,9 @@ const COMPOSITE_EDGE_ARROW_WIDTH = 18
 const COMPOSITE_EDGE_CHEVRON_SIZE = 8
 const COMPOSITE_EDGE_CHEVRON_MIN_LENGTH = 86
 const markerTypeIds = new Set(MARKER_TYPES.map((type) => type.id))
+const hiddenCompositeMarkerTypes = ref(readCompositeMarkerVisibility(HIDDEN_COMPOSITE_MARKER_TYPES_STORAGE_KEY))
+const hiddenCompositeMarkerIds = ref(readCompositeMarkerVisibility(HIDDEN_COMPOSITE_MARKER_IDS_STORAGE_KEY))
+const shownCompositeMarkerIds = ref(readCompositeMarkerVisibility(SHOWN_COMPOSITE_MARKER_IDS_STORAGE_KEY))
 const activeGeofenceStatus = computed(() => {
   if (!activeGeofence.value) return 'OFF'
   return isGamePositionInsideGeofence(
@@ -82,10 +91,18 @@ const activeGeofenceStatus = computed(() => {
     activeCoordinateTransform.value,
   ) ? 'INSIDE' : 'OUTSIDE'
 })
+const ROUTES_STORAGE_KEY = 'pph-routes'
 const pointer = ref({ pixelX: 0, pixelY: 0, x: 0, y: 0 })
-const routePoints = ref([])
 const routeEditMode = ref(false)
 const routeStatus = ref(null)
+const routes = ref(readStoredRoutes())
+const activeRouteId = ref(routes.value[0]?.id || null)
+const activeRoute = computed(() => routes.value.find((route) => route.id === activeRouteId.value) || null)
+const isAddingSegment = ref(false)
+const editingSegmentId = ref(null)
+const editingSegment = computed(() => activeRoute.value?.segments.find((segment) => segment.id === editingSegmentId.value) || null)
+const segmentPoints = ref([])
+const routeImportInput = ref(null)
 const calibrationMode = ref(false)
 const calibrationPoints = ref([])
 const geofenceMode = ref(false)
@@ -95,14 +112,24 @@ const transformForm = ref(createTransformForm())
 const compositeItemDragMode = ref(false)
 const compositeMarkerMode = ref(false)
 const compositeConnectionMode = ref(false)
+const markerVisibilityPickMode = ref(false)
+const compositeConnectionDirection = ref(
+  localStorage.getItem('pph-composite-connection-direction') === 'two-way' ? 'two-way' : 'one-way',
+)
 const pendingConnectionMarkerId = ref('')
 const compositeMarkerType = ref('portal')
 const compositeConnection = ref({ from: '', to: '' })
 const markerLabelDrafts = ref({})
-const visibleCompositeMarkers = computed(() =>
+const scopedCompositeMarkers = computed(() =>
   isCompositeLayer.value
     ? activeCompositeMarkers.value
     : activeCompositeMarkers.value.filter((marker) => marker.layerId === activeLayer.value.id),
+)
+const visibleCompositeMarkers = computed(() =>
+  scopedCompositeMarkers.value.filter((marker) => !isCompositeMarkerHidden(marker)),
+)
+const hiddenCompositeMarkerCount = computed(() =>
+  scopedCompositeMarkers.value.length - visibleCompositeMarkers.value.length,
 )
 const compositePortalMarkers = computed(() =>
   visibleCompositeMarkers.value.filter((marker) => getCompositeMarkerType(marker).id === 'portal'),
@@ -124,6 +151,7 @@ const navigationAngleConfidence = ref(0)
 const navigationAngleLayerId = ref(null)
 const navigationCoordinateSource = ref('none')
 const navigationTimestamp = ref(null)
+const manualLayerView = ref(false)
 const navigationAngleLayer = computed(() => {
   if (!isCompositeLayer.value || !navigationAngleLayerId.value) return activeLayer.value
   return getLayerById(navigationAngleLayerId.value) || activeLayer.value
@@ -144,7 +172,11 @@ const connectionLabel = computed(() => {
     disconnected: 'OFFLINE',
   }[connection.value]
 })
-const canSendRoute = computed(() => connection.value === 'connected' && routePoints.value.length > 0)
+const canSendRoute = computed(() =>
+  connection.value === 'connected'
+  && Boolean(activeRoute.value)
+  && activeRoute.value.segments.some((segment) => !segment.isHidden && getSegmentPoints(segment).some(isRoutePointOnActiveLayer)),
+)
 const hudGamePosition = computed(() => latestGamePosition.value || {
   x: pointer.value.x,
   y: pointer.value.y,
@@ -350,12 +382,179 @@ function normalizeCompositeEdge(edge) {
   return {
     from: edge?.from,
     to: edge?.to,
+    bidirectional: edge?.bidirectional === true,
     points,
   }
 }
 
 function getCompositeMarkerType(marker) {
   return MARKER_TYPES.find((type) => type.id === marker?.type) || MARKER_TYPES[0]
+}
+
+function readCompositeMarkerVisibility(storageKey) {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(storageKey) || '[]')
+    if (Array.isArray(parsed)) {
+      return parsed.reduce((result, key) => {
+        if (key) result[String(key)] = true
+        return result
+      }, {})
+    }
+    if (parsed && typeof parsed === 'object') {
+      return Object.entries(parsed).reduce((result, [key, enabled]) => {
+        if (key && enabled === true) result[String(key)] = true
+        return result
+      }, {})
+    }
+  } catch {
+    // Ignore invalid local storage state.
+  }
+  return {}
+}
+
+function persistCompositeMarkerVisibility(storageKey, visibility) {
+  const hiddenKeys = Object.entries(visibility || {})
+    .filter(([, enabled]) => enabled === true)
+    .map(([key]) => key)
+  localStorage.setItem(storageKey, JSON.stringify(hiddenKeys))
+}
+
+function readStoredRoutes() {
+  try {
+    const storedRoutes = JSON.parse(localStorage.getItem(ROUTES_STORAGE_KEY) || '[]')
+    return normalizeRoutes(Array.isArray(storedRoutes) ? storedRoutes : storedRoutes?.routes)
+  } catch {
+    return []
+  }
+}
+
+function persistRoutesLocally() {
+  localStorage.setItem(ROUTES_STORAGE_KEY, JSON.stringify(normalizeRoutes(routes.value)))
+}
+
+function downloadJson(payload, filename) {
+  const blobUrl = URL.createObjectURL(new Blob([`${JSON.stringify(payload, null, 2)}\n`], { type: 'application/json' }))
+  const link = document.createElement('a')
+  link.href = blobUrl
+  link.download = filename
+  document.body.appendChild(link)
+  link.click()
+  link.remove()
+  window.setTimeout(() => URL.revokeObjectURL(blobUrl), 0)
+}
+
+function getCompositeMarkerDisplayGlyph(marker) {
+  const markerType = getCompositeMarkerType(marker)
+  if (markerType.id === 'portal' || markerType.id === 'special-room') return ''
+  return markerType.shortLabel
+}
+
+function getCompositeMarkerBadge(markerOrType) {
+  const markerType = markerTypeIds.has(markerOrType?.id)
+    ? markerOrType
+    : getCompositeMarkerType(markerOrType)
+  return markerType.shortLabel || markerType.label.slice(0, 1)
+}
+
+function isCompositeMarkerTypeHidden(type) {
+  return hiddenCompositeMarkerTypes.value[type] === true
+}
+
+function isCompositeMarkerIdHidden(markerId) {
+  return hiddenCompositeMarkerIds.value[markerId] === true
+}
+
+function isCompositeMarkerIdShown(markerId) {
+  return shownCompositeMarkerIds.value[markerId] === true
+}
+
+function isCompositeMarkerHidden(marker) {
+  if (!marker) return true
+  if (isCompositeMarkerIdHidden(marker.id)) return true
+  return isCompositeMarkerTypeHidden(getCompositeMarkerType(marker).id) && !isCompositeMarkerIdShown(marker.id)
+}
+
+function setCompositeMarkerTypeHidden(type, hidden) {
+  if (!markerTypeIds.has(type)) return
+  const nextVisibility = { ...hiddenCompositeMarkerTypes.value }
+  if (hidden) nextVisibility[type] = true
+  else delete nextVisibility[type]
+  hiddenCompositeMarkerTypes.value = nextVisibility
+  const nextShownMarkers = { ...shownCompositeMarkerIds.value }
+  scopedCompositeMarkers.value
+    .filter((marker) => getCompositeMarkerType(marker).id === type)
+    .forEach((marker) => delete nextShownMarkers[marker.id])
+  shownCompositeMarkerIds.value = nextShownMarkers
+}
+
+function toggleCompositeMarkerTypeVisibility(type) {
+  setCompositeMarkerTypeHidden(type, !isCompositeMarkerTypeHidden(type))
+}
+
+function setCompositeMarkerHidden(markerId, hidden) {
+  if (!markerId) return
+  const nextVisibility = { ...hiddenCompositeMarkerIds.value }
+  if (hidden) nextVisibility[markerId] = true
+  else delete nextVisibility[markerId]
+  hiddenCompositeMarkerIds.value = nextVisibility
+  const nextShownMarkers = { ...shownCompositeMarkerIds.value }
+  delete nextShownMarkers[markerId]
+  shownCompositeMarkerIds.value = nextShownMarkers
+}
+
+function setCompositeMarkerShown(markerId, shown) {
+  if (!markerId) return
+  const nextShownMarkers = { ...shownCompositeMarkerIds.value }
+  if (shown) nextShownMarkers[markerId] = true
+  else delete nextShownMarkers[markerId]
+  shownCompositeMarkerIds.value = nextShownMarkers
+  if (shown) {
+    const nextHiddenMarkers = { ...hiddenCompositeMarkerIds.value }
+    delete nextHiddenMarkers[markerId]
+    hiddenCompositeMarkerIds.value = nextHiddenMarkers
+  }
+}
+
+function toggleCompositeMarkerVisibility(marker) {
+  if (!marker) return
+  if (isCompositeMarkerHidden(marker)) {
+    setCompositeMarkerShown(marker.id, true)
+    showStatus(`${marker.label || '未命名'} 已显示`)
+  } else {
+    setCompositeMarkerHidden(marker.id, true)
+    showStatus(`${marker.label || '未命名'} 已隐藏`)
+  }
+}
+
+function hideAllCompositeMarkers() {
+  hiddenCompositeMarkerIds.value = scopedCompositeMarkers.value.reduce((result, marker) => {
+    result[marker.id] = true
+    return result
+  }, {})
+  shownCompositeMarkerIds.value = {}
+}
+
+function showAllCompositeMarkers() {
+  hiddenCompositeMarkerTypes.value = {}
+  hiddenCompositeMarkerIds.value = {}
+  shownCompositeMarkerIds.value = {}
+}
+
+function toggleAreaLayerList() {
+  areaLayerListOpen.value = !areaLayerListOpen.value
+}
+
+function toggleMarkerVisibilityPickMode() {
+  markerVisibilityPickMode.value = !markerVisibilityPickMode.value
+  if (markerVisibilityPickMode.value) {
+    routeEditMode.value = false
+    compositeMarkerMode.value = false
+    compositeItemDragMode.value = false
+    compositeConnectionMode.value = false
+    pendingConnectionMarkerId.value = ''
+  }
+  renderCompositeAnnotations()
+  showStatus(markerVisibilityPickMode.value ? '点选地图标点切换显示/隐藏' : '标点点选已关闭')
 }
 
 function normalizeCompositeMarker(marker) {
@@ -392,7 +591,7 @@ function applyTransformForm() {
     ...coordinateTransformOverrides.value,
     [layerId]: coordinateTransform,
   }
-  routePoints.value = []
+  segmentPoints.value = []
   renderRoute()
   renderCalibrationPoints()
   renderGeofence()
@@ -488,6 +687,7 @@ function startCompositeMarkerMode() {
   routeEditMode.value = false
   compositeItemDragMode.value = false
   compositeConnectionMode.value = false
+  markerVisibilityPickMode.value = false
   pendingConnectionMarkerId.value = ''
   cancelCalibration()
   cancelGeofenceCalibration()
@@ -502,6 +702,7 @@ function toggleCompositeItemDragMode() {
   if (compositeItemDragMode.value) {
     compositeMarkerMode.value = false
     compositeConnectionMode.value = false
+    markerVisibilityPickMode.value = false
     pendingConnectionMarkerId.value = ''
   }
   renderCompositeAnnotations()
@@ -604,6 +805,7 @@ function removeCompositeMarker(markerId) {
   const nextDrafts = { ...markerLabelDrafts.value }
   delete nextDrafts[markerId]
   markerLabelDrafts.value = nextDrafts
+  setCompositeMarkerHidden(markerId, false)
   updateCompositeConfig(getCompositeConfigWith(overviewCompositeItems.value, nextMarkers, nextEdges))
 }
 
@@ -612,19 +814,54 @@ function addCompositeEdge(from = compositeConnection.value.from, to = compositeC
     showStatus('请选择两个不同的标记点')
     return
   }
-  if (activeCompositeEdges.value.some((edge) => edge.from === from && edge.to === to)) {
-    showStatus('这条有向连接已经存在')
-    return
-  }
   const fromMarker = activeCompositeMarkers.value.find((marker) => marker.id === from)
   const toMarker = activeCompositeMarkers.value.find((marker) => marker.id === to)
   if (getCompositeMarkerType(fromMarker).id !== 'portal' || getCompositeMarkerType(toMarker).id !== 'portal') {
     showStatus('只有传送门标点之间可以建立有向连接')
     return
   }
-  const nextEdges = [...activeCompositeEdges.value, { from, to, points: [] }]
+
+  const bidirectional = compositeConnectionDirection.value === 'two-way'
+  const existingEdgeIndex = activeCompositeEdges.value.findIndex((edge) =>
+    edge.from === from && edge.to === to,
+  )
+  const reverseEdgeIndex = activeCompositeEdges.value.findIndex((edge) =>
+    edge.from === to && edge.to === from,
+  )
+  if (existingEdgeIndex >= 0) {
+    const existingEdge = activeCompositeEdges.value[existingEdgeIndex]
+    if (!bidirectional || existingEdge.bidirectional === true) {
+      showStatus(bidirectional ? '双向连接已经存在' : '这条有向连接已经存在')
+      return
+    }
+    const nextEdges = activeCompositeEdges.value
+      .map((edge, index) =>
+        index === existingEdgeIndex ? { ...normalizeCompositeEdge(edge), bidirectional: true } : normalizeCompositeEdge(edge),
+      )
+      .filter((_, index) => !bidirectional || index !== reverseEdgeIndex)
+    updateCompositeConfig(getCompositeConfigWith(overviewCompositeItems.value, activeCompositeMarkers.value, nextEdges), { persistImmediately: true })
+    showStatus('已将连接改为双向箭头')
+    return
+  }
+
+  if (bidirectional && reverseEdgeIndex >= 0) {
+    const nextEdges = activeCompositeEdges.value.map((edge, index) => {
+      const normalized = normalizeCompositeEdge(edge)
+      return index === reverseEdgeIndex
+        ? { from, to, bidirectional: true, points: [...normalized.points].reverse() }
+        : normalized
+    })
+    updateCompositeConfig(getCompositeConfigWith(overviewCompositeItems.value, activeCompositeMarkers.value, nextEdges), { persistImmediately: true })
+    showStatus('已将反向连接改为双向箭头')
+    return
+  }
+
+  const nextEdges = [
+    ...activeCompositeEdges.value,
+    { from, to, bidirectional, points: [] },
+  ]
   updateCompositeConfig(getCompositeConfigWith(overviewCompositeItems.value, activeCompositeMarkers.value, nextEdges), { persistImmediately: true })
-  showStatus('传送门连接已添加')
+  showStatus(compositeConnectionDirection.value === 'two-way' ? '传送门双向连接已添加' : '传送门单向连接已添加')
 }
 
 function removeCompositeEdge(index) {
@@ -636,6 +873,7 @@ function toggleCompositeConnectionMode() {
   if (!isCompositeLayer.value) return
   compositeItemDragMode.value = false
   compositeMarkerMode.value = false
+  markerVisibilityPickMode.value = false
   compositeConnectionMode.value = !compositeConnectionMode.value
   pendingConnectionMarkerId.value = ''
   renderCompositeAnnotations()
@@ -644,6 +882,11 @@ function toggleCompositeConnectionMode() {
 
 function handleCompositeMarkerClick(marker, event) {
   L.DomEvent.stop(event)
+  if (markerVisibilityPickMode.value) {
+    toggleCompositeMarkerVisibility(marker)
+    renderCompositeAnnotations()
+    return
+  }
   if (!isCompositeLayer.value || !compositeConnectionMode.value) return
   if (getCompositeMarkerType(marker).id !== 'portal') {
     showStatus('只能连接传送门标点')
@@ -951,6 +1194,7 @@ function renderCompositeAnnotations() {
       .map((edge) => {
         const from = activeCompositeMarkers.value.find((marker) => marker.id === edge.from)
         const to = activeCompositeMarkers.value.find((marker) => marker.id === edge.to)
+        if (isCompositeMarkerHidden(from) || isCompositeMarkerHidden(to)) return null
         if (getCompositeMarkerType(from).id !== 'portal' || getCompositeMarkerType(to).id !== 'portal') return null
         const fromPosition = from && getMapMarkerPosition(from)
         const toPosition = to && getMapMarkerPosition(to)
@@ -961,18 +1205,24 @@ function renderCompositeAnnotations() {
     renderCompositeEdges(edgeEndpoints)
   }
 
-  visibleCompositeMarkers.value.forEach((marker) => {
+  const renderedMarkers = markerVisibilityPickMode.value ? scopedCompositeMarkers.value : visibleCompositeMarkers.value
+  renderedMarkers.forEach((marker) => {
     const position = getMapMarkerPosition(marker)
     if (!position) return
     const markerType = getCompositeMarkerType(marker)
+    const markerTypeGlyph = getCompositeMarkerDisplayGlyph(marker)
+    const markerTypeGlyphHtml = markerTypeGlyph ? `<i>${markerTypeGlyph}</i>` : ''
+    const hidden = isCompositeMarkerHidden(marker)
     const markerLayer = L.marker(position.latlng, {
       icon: L.divIcon({
         className: [
           'composite-point-marker',
           `composite-point-marker--${markerType.id}`,
+          hidden ? 'composite-point-marker--hidden' : '',
+          markerVisibilityPickMode.value ? 'composite-point-marker--visibility-pick' : '',
           pendingConnectionMarkerId.value === marker.id ? 'composite-point-marker--selected' : '',
         ].join(' '),
-        html: `<span title="${markerType.label}: ${marker.label || '未命名'}" style="--marker-color: ${markerType.color}"><i>${markerType.shortLabel}</i><b>${marker.label || '未命名'}</b></span>`,
+        html: `<span title="${markerType.label}: ${marker.label || '未命名'}" style="--marker-color: ${markerType.color}">${markerTypeGlyphHtml}<b>${marker.label || '未命名'}</b></span>`,
         iconSize: [COMPOSITE_MARKER_ICON_SIZE.width, COMPOSITE_MARKER_ICON_SIZE.height],
         iconAnchor: [COMPOSITE_MARKER_ICON_SIZE.width / 2, COMPOSITE_MARKER_ICON_SIZE.height / 2],
       }),
@@ -993,10 +1243,10 @@ function renderCompositeEdges(edges) {
   if (!edges.length) return
   edges.forEach(({ edge, fromPosition, toPosition }, edgeIndex) => {
     const routePoints = getCompositeEdgeRoutePoints(edge, fromPosition, toPosition)
-    const displayLatLngs = getDisplayEdgeLatLngs(routePoints)
+    const displayLatLngs = getDisplayEdgeLatLngs(routePoints, edge.bidirectional === true)
     if (displayLatLngs.length < 2) return
 
-    const visibleEdge = createCompositeEdgeLayer(displayLatLngs)
+    const visibleEdge = createCompositeEdgeLayer(displayLatLngs, edge.bidirectional === true)
     visibleEdge.layer.addTo(compositeMarkerLayer)
 
     if (compositeConnectionMode.value) {
@@ -1032,7 +1282,7 @@ function renderCompositeEdges(edges) {
         waypoint.on('drag', (event) => {
           const liveRoute = getCompositeEdgeRoutePoints(edge, fromPosition, toPosition)
           liveRoute[pointIndex + 1] = latLngToPoint(event.latlng)
-          const liveDisplayLatLngs = getDisplayEdgeLatLngs(liveRoute)
+          const liveDisplayLatLngs = getDisplayEdgeLatLngs(liveRoute, edge.bidirectional === true)
           visibleEdge.update(liveDisplayLatLngs)
         })
         waypoint.on('dragend', (event) => {
@@ -1051,17 +1301,21 @@ function renderCompositeEdges(edges) {
   })
 }
 
-function createCompositeEdgeLayer(latlngs) {
+function createCompositeEdgeLayer(latlngs, bidirectional = false) {
   const layer = L.layerGroup()
   const update = (nextLatLngs) => {
     layer.clearLayers()
     if (!map || !map._loaded || nextLatLngs.length < 2) return
     const scale = getAnnotationScale()
-    const lineLatLngs = trimCompositeEdgeLatLngsForArrow(nextLatLngs, scale)
+    const lineLatLngs = trimCompositeEdgeLatLngsForArrow(nextLatLngs, scale, bidirectional)
     addCompositeEdgeStrokeLayers(layer, lineLatLngs, scale)
-    createCompositeEdgeChevronLayers(nextLatLngs, scale).forEach((chevron) => chevron.addTo(layer))
+    if (!bidirectional) createCompositeEdgeChevronLayers(nextLatLngs, scale).forEach((chevron) => chevron.addTo(layer))
     const arrow = createCompositeEdgeArrowLayer(nextLatLngs, scale)
     if (arrow) arrow.addTo(layer)
+    if (bidirectional) {
+      const reverseArrow = createCompositeEdgeArrowLayer([...nextLatLngs].reverse(), scale)
+      if (reverseArrow) reverseArrow.addTo(layer)
+    }
   }
   update(latlngs)
   return { layer, update }
@@ -1092,9 +1346,16 @@ function addCompositeEdgeStrokeLayers(layer, latlngs, scale = 1) {
   })
 }
 
-function trimCompositeEdgeLatLngsForArrow(latlngs, scale = 1) {
+function trimCompositeEdgeLatLngsForArrow(latlngs, scale = 1, trimStart = false) {
   if (!map || latlngs.length < 2) return latlngs
   const points = latlngs.map((latlng) => map.latLngToLayerPoint(latlng))
+  if (trimStart) {
+    const start = points[0]
+    const next = points[1]
+    const distance = getPointDistance(start, next)
+    const trim = Math.min(COMPOSITE_EDGE_ARROW_LENGTH * scale * 0.54, distance * 0.45)
+    if (trim > 0) points[0] = pointToward(start, next, trim)
+  }
   const endIndex = points.length - 1
   const end = points[endIndex]
   const previous = points[endIndex - 1]
@@ -1227,7 +1488,7 @@ function getCompositeEdgeRoutePoints(edge, fromPosition, toPosition) {
   ].filter((point) => Number.isFinite(point.x) && Number.isFinite(point.y))
 }
 
-function getDisplayEdgeLatLngs(routePoints) {
+function getDisplayEdgeLatLngs(routePoints, bidirectional = false) {
   if (routePoints.length < 2) return []
   const latlngs = routePoints.map(pointToLatLng)
   if (!map || !map._loaded) return latlngs
@@ -1244,7 +1505,10 @@ function getDisplayEdgeLatLngs(routePoints) {
   const firstUnit = { x: firstVector.x / firstLength, y: firstVector.y / firstLength }
   const lastUnit = { x: lastVector.x / lastLength, y: lastVector.y / lastLength }
 
-  const sourcePadding = Math.min(markerBoxPadding(firstUnit, 4), firstLength * 0.45)
+  const sourcePadding = Math.min(
+    markerBoxPadding(firstUnit, bidirectional ? COMPOSITE_EDGE_ARROW_TIP_OFFSET : 4),
+    firstLength * 0.45,
+  )
   const targetPadding = Math.min(
     markerBoxPadding(lastUnit, COMPOSITE_EDGE_ARROW_TIP_OFFSET),
     lastLength * 0.45,
@@ -1375,23 +1639,119 @@ function renderNavigationMarker() {
 function renderRoute() {
   if (!routeLayer) return
   routeLayer.clearLayers()
-  const latlngs = routePoints.value.map((point) => mapper.value.locatorToLatLng({
-    ...point,
+  if (isAddingSegment.value) {
+    drawRouteSegment(segmentPoints.value, '#ffd27d', true)
+    return
+  }
+  const colors = ['#ffd27d', '#b8fff2', '#e8a6ff', '#ff8a70', '#87a9ff']
+  routes.value
+    .filter((route) => !route.isHidden)
+    .forEach((route, routeIndex) => {
+      route.segments
+        .filter((segment) => !segment.isHidden)
+        .forEach((segment, segmentIndex) => {
+          drawRouteSegment(getSegmentPoints(segment), colors[(routeIndex + segmentIndex) % colors.length], false)
+        })
+    })
+}
+
+function normalizeRoutePoint(point) {
+  if (!point || typeof point !== 'object') return null
+  const pixelX = Number(point.pixelX ?? point.x)
+  const pixelY = Number(point.pixelY ?? point.y)
+  if (!Number.isFinite(pixelX) || !Number.isFinite(pixelY)) return null
+  return {
+    layerId: String(point.layerId || activeLayer.value.id),
+    pixelX: Number(pixelX.toFixed(3)),
+    pixelY: Number(pixelY.toFixed(3)),
+  }
+}
+
+function getSegmentPoints(segment) {
+  return Array.isArray(segment?.points)
+    ? segment.points.map(normalizeRoutePoint).filter(Boolean)
+    : []
+}
+
+function normalizeRoutes(importedRoutes) {
+  return Array.isArray(importedRoutes)
+    ? importedRoutes
+        .filter((route) => route && typeof route === 'object')
+        .map((route, routeIndex) => ({
+          id: String(route.id || `route-${Date.now()}-${routeIndex}`),
+          name: String(route.name || `路线 ${routeIndex + 1}`),
+          isHidden: route.isHidden === true,
+          segments: Array.isArray(route.segments)
+            ? route.segments
+                .filter((segment) => segment && typeof segment === 'object')
+                .map((segment, segmentIndex) => ({
+                  id: String(segment.id || `segment-${Date.now()}-${routeIndex}-${segmentIndex}`),
+                  name: String(segment.name || `路段 ${segmentIndex + 1}`),
+                  isHidden: segment.isHidden === true,
+                  points: getSegmentPoints(segment),
+                }))
+            : [],
+        }))
+    : []
+}
+
+function routesForExport() {
+  return normalizeRoutes(routes.value).map((route) => ({
+    ...route,
+    segments: route.segments.map((segment) => ({
+      ...segment,
+      points: getSegmentPoints(segment).map((point) => ({
+        layerId: point.layerId,
+        x: point.pixelX,
+        y: point.pixelY,
+      })),
+    })),
+  }))
+}
+
+function isRoutePointOnActiveLayer(point) {
+  return normalizeRoutePoint(point)?.layerId === activeLayer.value.id
+}
+
+function routePointToLatLng(point) {
+  const normalized = normalizeRoutePoint(point)
+  if (!normalized || normalized.layerId !== activeLayer.value.id) return null
+  return mapper.value.locatorToLatLng({
+    pixelX: normalized.pixelX,
+    pixelY: normalized.pixelY,
     sourceWidth: activeLayer.value.locator.sourceWidth,
     sourceHeight: activeLayer.value.locator.sourceHeight,
-  }))
+  })
+}
+
+function drawRouteSegment(points, color, editable = false) {
+  const visiblePoints = points
+    .map((point, originalIndex) => ({ point: normalizeRoutePoint(point), originalIndex }))
+    .filter(({ point }) => point && point.layerId === activeLayer.value.id)
+  const latlngs = visiblePoints.map(({ point }) => routePointToLatLng(point)).filter(Boolean)
   if (latlngs.length > 1) {
-    L.polyline(latlngs, { color: '#ff7cab', weight: 4, opacity: 0.92 }).addTo(routeLayer)
+    L.polyline(latlngs, {
+      color,
+      weight: editable ? 5 : 4,
+      opacity: editable ? 1 : 0.88,
+      dashArray: editable ? '10 6' : undefined,
+    }).addTo(routeLayer)
   }
-  latlngs.forEach((latlng, index) => {
-    L.marker(latlng, {
+  visiblePoints.forEach(({ point, originalIndex }, visibleIndex) => {
+    const latlng = routePointToLatLng(point)
+    if (!latlng) return
+    const marker = L.marker(latlng, {
+      draggable: editable,
       icon: L.divIcon({
-        className: 'route-point-shell',
-        html: `<span>${index + 1}</span>`,
+        className: editable ? 'route-point-handle' : 'route-point-shell',
+        html: `<span style="--route-color:${color}">${visibleIndex + 1}</span>`,
         iconSize: [26, 26],
         iconAnchor: [13, 13],
       }),
     }).addTo(routeLayer)
+    if (editable) {
+      marker.on('dragend', (event) => updateSegmentPoint(originalIndex, event.target.getLatLng()))
+    }
   })
 }
 
@@ -1469,35 +1829,168 @@ function resetView() {
 }
 
 function clearRoute() {
-  routePoints.value = []
+  routes.value = []
+  activeRouteId.value = null
+  cancelSegment()
+  persistRoutesLocally()
   renderRoute()
 }
 
-function toggleRouteEditMode() {
-  if (isCompositeLayer.value) return
-  if (routeEditMode.value) {
-    routeEditMode.value = false
-    showStatus('路线编辑已关闭')
-    return
-  }
-  cancelCalibration()
-  cancelGeofenceCalibration()
-  routeEditMode.value = true
-  showStatus('路线编辑已开启：点击地图添加路径点')
-}
-
 function undoRoutePoint() {
-  routePoints.value = routePoints.value.slice(0, -1)
+  segmentPoints.value = segmentPoints.value.slice(0, -1)
   renderRoute()
 }
 
 function addRoutePoint(latlng) {
   const point = mapper.value.latLngToLocator(latlng)
-  routePoints.value = [...routePoints.value, {
+  segmentPoints.value = [...segmentPoints.value, {
+    layerId: activeLayer.value.id,
     pixelX: Number(point.pixelX.toFixed(3)),
     pixelY: Number(point.pixelY.toFixed(3)),
   }]
   renderRoute()
+}
+
+function updateSegmentPoint(index, latlng) {
+  const point = mapper.value.latLngToLocator(latlng)
+  segmentPoints.value = segmentPoints.value.map((item, pointIndex) =>
+    pointIndex === index
+      ? {
+          layerId: activeLayer.value.id,
+          pixelX: Number(point.pixelX.toFixed(3)),
+          pixelY: Number(point.pixelY.toFixed(3)),
+        }
+      : item,
+  )
+  renderRoute()
+}
+
+function createRoute() {
+  const name = window.prompt('路线名称')
+  if (!name?.trim()) return null
+  const route = { id: `route-${Date.now()}`, name: name.trim(), segments: [] }
+  routes.value = [...routes.value, route]
+  activeRouteId.value = route.id
+  persistRoutesLocally()
+  renderRoute()
+  return route
+}
+
+function deleteRoute(route) {
+  if (!route || !window.confirm(`删除路线“${route.name}”？`)) return
+  routes.value = routes.value.filter((item) => item.id !== route.id)
+  activeRouteId.value = routes.value[0]?.id || null
+  cancelSegment()
+  persistRoutesLocally()
+  renderRoute()
+}
+
+function startSegment() {
+  if (!activeRoute.value || isCompositeLayer.value) return
+  cancelCalibration()
+  cancelGeofenceCalibration()
+  compositeMarkerMode.value = false
+  markerVisibilityPickMode.value = false
+  routeEditMode.value = true
+  isAddingSegment.value = true
+  editingSegmentId.value = null
+  segmentPoints.value = []
+  renderRoute()
+  showStatus('点击地图添加路段点')
+}
+
+function editSegment(segment) {
+  if (!activeRoute.value || !segment || isCompositeLayer.value) return
+  cancelCalibration()
+  cancelGeofenceCalibration()
+  compositeMarkerMode.value = false
+  markerVisibilityPickMode.value = false
+  routeEditMode.value = true
+  isAddingSegment.value = true
+  editingSegmentId.value = segment.id
+  segmentPoints.value = getSegmentPoints(segment)
+  renderRoute()
+}
+
+function cancelSegment() {
+  isAddingSegment.value = false
+  editingSegmentId.value = null
+  segmentPoints.value = []
+  routeEditMode.value = false
+  renderRoute()
+}
+
+function finishSegment() {
+  if (!activeRoute.value || segmentPoints.value.length < 2) return
+  if (editingSegment.value) {
+    editingSegment.value.points = [...segmentPoints.value]
+  } else {
+    const name = window.prompt('路段名称')
+    if (!name?.trim()) return
+    activeRoute.value.segments.push({
+      id: `segment-${Date.now()}`,
+      name: name.trim(),
+      points: [...segmentPoints.value],
+    })
+  }
+  cancelSegment()
+  persistRoutesLocally()
+  renderRoute()
+}
+
+function deleteSegment(segment) {
+  if (!activeRoute.value || !segment || !window.confirm(`删除路段“${segment.name}”？`)) return
+  activeRoute.value.segments = activeRoute.value.segments.filter((item) => item.id !== segment.id)
+  if (editingSegmentId.value === segment.id) cancelSegment()
+  persistRoutesLocally()
+  renderRoute()
+}
+
+function toggleRouteVisibility(route) {
+  if (!route) return
+  if (activeRouteId.value !== route.id) {
+    activeRouteId.value = route.id
+    if (route.isHidden) route.isHidden = false
+  } else {
+    route.isHidden = !route.isHidden
+  }
+  persistRoutesLocally()
+  renderRoute()
+}
+
+function toggleSegmentVisibility(segment) {
+  if (!segment) return
+  segment.isHidden = !segment.isHidden
+  persistRoutesLocally()
+  renderRoute()
+}
+
+function exportRoutes() {
+  downloadJson({
+    version: 1,
+    routes: routesForExport(),
+  }, `MaaNTE-PPH-routes-${new Date().toISOString().slice(0, 10)}.json`)
+  showStatus('路线 JSON 已导出')
+}
+
+async function importRoutes(event) {
+  const [file] = event.target.files || []
+  event.target.value = ''
+  if (!file) return
+  try {
+    const payload = JSON.parse(await file.text())
+    const importedRoutes = Array.isArray(payload) ? payload : payload.routes
+    const nextRoutes = normalizeRoutes(importedRoutes)
+    if (!nextRoutes.length && !Array.isArray(importedRoutes)) throw new Error('invalid routes')
+    routes.value = nextRoutes
+    activeRouteId.value = routes.value[0]?.id || null
+    cancelSegment()
+    persistRoutesLocally()
+    renderRoute()
+    showStatus(`已导入 ${routes.value.length} 条路线`)
+  } catch {
+    showStatus('路线 JSON 格式无效')
+  }
 }
 
 function startCalibration() {
@@ -1760,7 +2253,7 @@ function handleMapClick(latlng) {
   }
   if (calibrationMode.value) addCalibrationPoint(latlng)
   else if (geofenceMode.value) addGeofenceCorner(latlng)
-  else if (routeEditMode.value) addRoutePoint(latlng)
+  else if (isAddingSegment.value) addRoutePoint(latlng)
 }
 
 function sendMessage(payload) {
@@ -1772,15 +2265,47 @@ function sendMessage(payload) {
   return true
 }
 
-function sendRoute(start = true) {
-  if (!routePoints.value.length) return
+function buildNavigationWaypoints(points) {
+  const waypoints = points
+    .map(normalizeRoutePoint)
+    .filter((point) => point && point.layerId === activeLayer.value.id)
+    .map((point) => ({ pixelX: point.pixelX, pixelY: point.pixelY }))
+  return waypoints.filter((point, index) => {
+    const previous = waypoints[index - 1]
+    return !previous || previous.pixelX !== point.pixelX || previous.pixelY !== point.pixelY
+  })
+}
+
+function sendNavigationWaypoints(points, label = '路线', start = true) {
+  const waypoints = buildNavigationWaypoints(points)
+  if (!waypoints.length) {
+    showStatus(`${label}在当前区域没有可发送的路径点`)
+    return false
+  }
   if (sendMessage({
     type: 'navi-route-set',
     sourceWidth: activeLayer.value.locator.sourceWidth,
     sourceHeight: activeLayer.value.locator.sourceHeight,
     start,
-    waypoints: routePoints.value,
-  })) showStatus(`已发送 ${routePoints.value.length} 个路径点`)
+    waypoints,
+  })) {
+    showStatus(`已发送 ${waypoints.length} 个路径点`)
+    return true
+  }
+  return false
+}
+
+function sendRouteToNavigation(route = activeRoute.value, start = true) {
+  if (!route) return false
+  const points = route.segments
+    .filter((segment) => !segment.isHidden)
+    .flatMap((segment) => getSegmentPoints(segment))
+  return sendNavigationWaypoints(points, route.name || '路线', start)
+}
+
+function sendSegmentToNavigation(segment, start = true) {
+  if (!segment) return false
+  return sendNavigationWaypoints(getSegmentPoints(segment), segment.name || '路段', start)
 }
 
 async function handleNavigationMessage(event) {
@@ -1814,17 +2339,26 @@ async function handleNavigationMessage(event) {
       : null
     if (incomingGamePosition) latestGamePosition.value = incomingGamePosition
 
+    let suppressNavigationForCurrentLayer = false
     const configuredGeofenceLayers = getConfiguredGeofenceLayers()
     if (!isCompositeLayer.value && configuredGeofenceLayers.length && incomingGamePosition) {
       const matchedLayer = findLayerForGamePosition(incomingGamePosition)
       const currentLayerHasGeofence = Boolean(getLayerGeofence(activeLayer.value))
-      if (!matchedLayer && currentLayerHasGeofence) {
+      const matchedCurrentLayer = matchedLayer?.id === activeLayer.value.id
+      suppressNavigationForCurrentLayer = manualLayerView.value
+        && (Boolean(matchedLayer && !matchedCurrentLayer) || (!matchedLayer && currentLayerHasGeofence))
+
+      if (!manualLayerView.value && !matchedLayer && currentLayerHasGeofence) {
         navigationPosition.value = null
         renderNavigationMarker()
         return
       }
-      if (matchedLayer && matchedLayer.id !== activeLayer.value.id) {
+      if (!manualLayerView.value && matchedLayer && matchedLayer.id !== activeLayer.value.id) {
         await changeLayer(matchedLayer.id, { preserveNavigation: true })
+        suppressNavigationForCurrentLayer = false
+      } else if (manualLayerView.value && matchedCurrentLayer) {
+        manualLayerView.value = false
+        suppressNavigationForCurrentLayer = false
       }
     }
 
@@ -1836,7 +2370,14 @@ async function handleNavigationMessage(event) {
     const compositeNavigation = isCompositeLayer.value && incomingGamePosition
       ? resolveCompositeNavigationPosition(incomingGamePosition)
       : null
-    const resolvedPosition = isCompositeLayer.value
+    const resolvedPosition = suppressNavigationForCurrentLayer
+      ? {
+          position: null,
+          source: 'MANUAL LAYER VIEW',
+          usesGameCoordinates: false,
+          angleLayer: activeLayer.value,
+        }
+      : isCompositeLayer.value
       ? {
           position: compositeNavigation?.position || null,
           source: compositeNavigation?.layer ? `COMPOSITE CHILD / ${compositeNavigation.layer.name}` : 'COMPOSITE CHILD',
@@ -1930,8 +2471,12 @@ function applyEndpoint() {
   }
 }
 
-async function changeLayer(id, { preserveNavigation = false } = {}) {
+async function changeLayer(id, { preserveNavigation = false, manual = false } = {}) {
   if (id === activeLayerId.value) return
+  if (manual) {
+    manualLayerView.value = id !== OVERVIEW_LAYER_ID
+    if (id !== OVERVIEW_LAYER_ID) areaLayerListOpen.value = true
+  }
   activeLayerId.value = id
   navigationAngleLayerId.value = null
   localStorage.setItem('pph-active-layer', id)
@@ -1942,8 +2487,10 @@ async function changeLayer(id, { preserveNavigation = false } = {}) {
   compositeMarkerMode.value = false
   compositeItemDragMode.value = false
   compositeConnectionMode.value = false
+  markerVisibilityPickMode.value = false
   pendingConnectionMarkerId.value = ''
-  clearRoute()
+  cancelSegment()
+  renderRoute()
   cancelCalibration()
   cancelGeofenceCalibration()
   renderGeofence()
@@ -1964,6 +2511,20 @@ watch(realtimeEnabled, (enabled) => {
   else disconnectSocket()
 })
 watch(followEnabled, (enabled) => localStorage.setItem('pph-follow-enabled', String(enabled)))
+watch(areaLayerListOpen, (open) => localStorage.setItem('pph-area-layer-list-open', String(open)))
+watch(compositeConnectionDirection, (direction) => localStorage.setItem('pph-composite-connection-direction', direction))
+watch(hiddenCompositeMarkerTypes, (visibility) => {
+  persistCompositeMarkerVisibility(HIDDEN_COMPOSITE_MARKER_TYPES_STORAGE_KEY, visibility)
+  renderCompositeAnnotations()
+}, { deep: true })
+watch(hiddenCompositeMarkerIds, (visibility) => {
+  persistCompositeMarkerVisibility(HIDDEN_COMPOSITE_MARKER_IDS_STORAGE_KEY, visibility)
+  renderCompositeAnnotations()
+}, { deep: true })
+watch(shownCompositeMarkerIds, (visibility) => {
+  persistCompositeMarkerVisibility(SHOWN_COMPOSITE_MARKER_IDS_STORAGE_KEY, visibility)
+  renderCompositeAnnotations()
+}, { deep: true })
 watch(activeLayerId, () => syncTransformFormFromLayer(), { immediate: true })
 watch(transformForm, () => scheduleTransformPersist(), { deep: true })
 watch([compositeMarkerMode, compositeItemDragMode], () => {
@@ -2021,6 +2582,7 @@ onUnmounted(() => {
       'app-shell--calibrating': calibrationMode,
       'app-shell--route-editing': routeEditMode,
       'app-shell--composite-marking': compositeMarkerMode,
+      'app-shell--marker-visibility-picking': markerVisibilityPickMode,
     }"
   >
     <div ref="mapElement" class="map-canvas" />
@@ -2049,17 +2611,71 @@ onUnmounted(() => {
         <h2>楼层 / 区域</h2>
         <div class="layer-list">
           <button
-            v-for="layer in displayLayers"
+            v-for="layer in overviewDisplayLayers"
             :key="layer.id"
             type="button"
             :class="{ active: layer.id === activeLayer.id }"
-            @click="changeLayer(layer.id)"
+            @click="changeLayer(layer.id, { manual: true })"
           >
             <span>{{ layer.name }}</span>
             <small>{{ layer.subtitle }}</small>
             <i>{{ layer.id === activeLayer.id ? '显示中' : '切换' }}</i>
           </button>
+          <div class="layer-group" :class="{ 'layer-group--collapsed': !areaLayerListOpen }">
+            <button class="layer-group-toggle" type="button" @click="toggleAreaLayerList">
+              <span>
+                <b>区域地图</b>
+                <small>{{ areaLayerListOpen ? `${areaDisplayLayers.length} 个区域` : activeLayer.id === OVERVIEW_LAYER_ID ? '默认折叠' : activeLayer.name }}</small>
+              </span>
+              <i>{{ areaLayerListOpen ? '收起' : '展开' }}</i>
+            </button>
+            <div v-show="areaLayerListOpen" class="layer-group-items">
+              <button
+                v-for="layer in areaDisplayLayers"
+                :key="layer.id"
+                type="button"
+                :class="{ active: layer.id === activeLayer.id }"
+                @click="changeLayer(layer.id, { manual: true })"
+              >
+                <span>{{ layer.name }}</span>
+                <small>{{ layer.subtitle }}</small>
+                <i>{{ layer.id === activeLayer.id ? '显示中' : '切换' }}</i>
+              </button>
+            </div>
+          </div>
         </div>
+
+        <div v-if="scopedCompositeMarkers.length" class="marker-display-panel">
+          <div class="marker-display-heading">
+            <span>
+              <b>标点显示</b>
+              <small>{{ hiddenCompositeMarkerCount ? `已隐藏 ${hiddenCompositeMarkerCount} 个` : '全部显示中' }}</small>
+            </span>
+            <i>{{ visibleCompositeMarkers.length }}/{{ scopedCompositeMarkers.length }}</i>
+          </div>
+          <div class="marker-display-actions">
+            <button type="button" :disabled="hiddenCompositeMarkerCount === 0" @click="showAllCompositeMarkers">全部显示</button>
+            <button type="button" :disabled="hiddenCompositeMarkerCount === scopedCompositeMarkers.length" @click="hideAllCompositeMarkers">全部隐藏</button>
+            <button type="button" :class="{ active: markerVisibilityPickMode }" @click="toggleMarkerVisibilityPickMode">
+              {{ markerVisibilityPickMode ? '结束点选' : '点选标点' }}
+            </button>
+          </div>
+          <div class="marker-display-types" aria-label="按分类控制标点显示">
+            <button
+              v-for="type in MARKER_TYPES"
+              :key="`display-${type.id}`"
+              type="button"
+              :class="{ 'marker-display-type--muted': isCompositeMarkerTypeHidden(type.id) }"
+              :style="{ '--marker-color': type.color }"
+              @click="toggleCompositeMarkerTypeVisibility(type.id)"
+            >
+              <span>{{ getCompositeMarkerBadge(type) }}</span>
+              <b>{{ type.label }}</b>
+              <small>{{ isCompositeMarkerTypeHidden(type.id) ? '隐藏' : '显示' }}</small>
+            </button>
+          </div>
+        </div>
+
         <div v-if="isDevelopment && !isCompositeLayer" class="calibration-panel" :class="{ 'calibration-panel--complete': isLayerCalibrated }">
           <div class="calibration-panel__heading">
             <span>
@@ -2167,7 +2783,7 @@ onUnmounted(() => {
               <b>地图标点</b>
               <small>{{ isCompositeLayer ? '全图同步标点与传送门连接' : '当前区域独立标点' }}</small>
             </span>
-            <i>{{ visibleCompositeMarkers.length }} 点</i>
+            <i>{{ visibleCompositeMarkers.length }}/{{ scopedCompositeMarkers.length }} 点</i>
           </div>
 
           <div class="composite-marker-tools">
@@ -2180,7 +2796,7 @@ onUnmounted(() => {
                 :style="{ '--marker-color': type.color }"
                 @click="compositeMarkerType = type.id"
               >
-                <span>{{ type.shortLabel }}</span>
+                <span>{{ getCompositeMarkerBadge(type) }}</span>
                 {{ type.label }}
               </button>
             </div>
@@ -2210,15 +2826,33 @@ onUnmounted(() => {
               <i>{{ isCompositeLayer ? `${activeCompositeEdges.length} 连接` : activeLayer.name }}</i>
             </div>
 
-            <div v-if="visibleCompositeMarkers.length" class="composite-marker-list">
+            <div v-if="isCompositeLayer" class="composite-connection-direction" aria-label="连接方向">
+              <button
+                type="button"
+                :class="{ active: compositeConnectionDirection === 'one-way' }"
+                @click="compositeConnectionDirection = 'one-way'"
+              >
+                单向
+              </button>
+              <button
+                type="button"
+                :class="{ active: compositeConnectionDirection === 'two-way' }"
+                @click="compositeConnectionDirection = 'two-way'"
+              >
+                双向
+              </button>
+            </div>
+
+            <div v-if="scopedCompositeMarkers.length" class="composite-marker-list">
               <div
-                v-for="marker in visibleCompositeMarkers"
+                v-for="marker in scopedCompositeMarkers"
                 :key="marker.id"
                 class="composite-marker-row"
+                :class="{ 'composite-marker-row--hidden': isCompositeMarkerHidden(marker) }"
               >
                 <div class="composite-marker-row__main">
                   <b :style="{ '--marker-color': getCompositeMarkerType(marker).color }">
-                    {{ getCompositeMarkerType(marker).shortLabel }}
+                    {{ getCompositeMarkerBadge(getCompositeMarkerType(marker)) }}
                   </b>
                   <input
                     :value="getCompositeMarkerLabelDraft(marker)"
@@ -2229,6 +2863,12 @@ onUnmounted(() => {
                     @blur="commitCompositeMarkerLabel(marker.id)"
                     @keydown.enter.prevent="$event.target.blur()"
                   />
+                  <button
+                    type="button"
+                    @click="toggleCompositeMarkerVisibility(marker)"
+                  >
+                    {{ isCompositeMarkerHidden(marker) ? '显示' : '隐藏' }}
+                  </button>
                   <button type="button" @click="removeCompositeMarker(marker.id)">删除</button>
                 </div>
                 <div class="composite-marker-row__meta">
@@ -2256,7 +2896,7 @@ onUnmounted(() => {
             <div v-if="isCompositeLayer && compositeConnectionMode" class="composite-link-hint">
               {{ pendingConnectionMarkerId
                 ? `已选择 ${activeCompositeMarkers.find((marker) => marker.id === pendingConnectionMarkerId)?.label || '起点'}，再点一个传送门作为终点`
-                : '点击两个传送门创建连接；点击线段添加拐点，点击拐点删除'
+                : `点击两个传送门创建${compositeConnectionDirection === 'two-way' ? '双向' : '单向'}连接；点击线段添加拐点，点击拐点删除`
               }}
             </div>
 
@@ -2268,7 +2908,7 @@ onUnmounted(() => {
               >
                 <span>
                   #{{ activeCompositeMarkers.find((marker) => marker.id === edge.from)?.label || edge.from }}
-                  →
+                  {{ edge.bidirectional ? '↔' : '→' }}
                   #{{ activeCompositeMarkers.find((marker) => marker.id === edge.to)?.label || edge.to }}
                   <small v-if="edge.points?.length"> · {{ edge.points.length }} 拐点</small>
                 </span>
@@ -2346,7 +2986,10 @@ onUnmounted(() => {
         </div>
         <label class="setting-row">
           <span><b>箭头保持居中</b><small>接收位置后自动跟随</small></span>
-          <input v-model="followEnabled" type="checkbox" />
+          <span class="switch setting-row-switch">
+            <input v-model="followEnabled" type="checkbox" />
+            <i />
+          </span>
         </label>
         <div class="endpoint-fields">
           <label><span>协议</span><select v-model="navigationProtocol" @change="applyEndpoint"><option>ws</option><option>wss</option></select></label>
@@ -2364,37 +3007,63 @@ onUnmounted(() => {
             <p class="eyebrow">ROUTES</p>
             <h2>路线规划</h2>
           </div>
-          <label class="switch route-edit-switch">
-            <input :checked="routeEditMode" type="checkbox" :disabled="isCompositeLayer" @change="toggleRouteEditMode" />
-            <i />
-          </label>
+          <button type="button" class="text-button" @click="createRoute">+ 新建</button>
         </div>
-        <p class="route-help">
-          {{ routeEditMode ? '路线编辑已开启，依次点击地图添加路径点。' : '路线编辑关闭时，点击地图不会添加路径点。' }}
-        </p>
-        <div class="route-count" :class="{ active: routeEditMode }">
-          <span>{{ routeEditMode ? '编辑中' : '已关闭' }}</span>
-          <strong>{{ routePoints.length }} 点</strong>
+        <div class="route-file-actions">
+          <button type="button" @click="routeImportInput?.click()">导入 JSON</button>
+          <button type="button" :disabled="!routes.length" @click="exportRoutes">导出 JSON</button>
+          <input ref="routeImportInput" type="file" accept="application/json,.json" @change="importRoutes" />
         </div>
-        <div class="route-actions">
-          <button type="button" :disabled="isCompositeLayer" @click="toggleRouteEditMode">
-            {{ routeEditMode ? '关闭编辑' : '开启编辑' }}
+        <div class="route-list">
+          <button
+            v-for="route in routes"
+            :key="route.id"
+            type="button"
+            :class="{ active: activeRouteId === route.id, hidden: route.isHidden }"
+            @click="toggleRouteVisibility(route)"
+          >
+            <span>{{ route.name }}</span>
+            <small>{{ route.isHidden ? '已隐藏' : `${route.segments.length} 个路段` }}</small>
           </button>
-          <button type="button" :disabled="!routePoints.length" @click="undoRoutePoint">撤销</button>
-          <button type="button" :disabled="!routePoints.length" @click="clearRoute">清空</button>
         </div>
-        <div class="route-actions">
-          <button type="button" :disabled="!canSendRoute" @click="sendRoute(true)">发送整条路线</button>
-        </div>
-        <div class="route-controls">
-          <button type="button" :disabled="connection !== 'connected'" @click="sendMessage({ type: 'navi-route-start' })">开始</button>
-          <button type="button" :disabled="connection !== 'connected'" @click="sendMessage({ type: 'navi-route-stop' })">暂停</button>
-          <button type="button" :disabled="connection !== 'connected'" @click="sendMessage({ type: 'navi-route-clear' })">清空服务端</button>
-        </div>
-        <small v-if="routeStatus">
-          服务端：{{ routeStatus.status || 'unknown' }}
-          {{ routeStatus.currentIndex || 0 }}/{{ routeStatus.waypoints?.length || 0 }}
-        </small>
+
+        <template v-if="activeRoute">
+          <div class="route-heading">
+            <b>{{ activeRoute.name }}</b>
+            <button type="button" @click="deleteRoute(activeRoute)">删除路线</button>
+          </div>
+          <div class="route-file-actions">
+            <button type="button" :disabled="!canSendRoute" @click="sendRouteToNavigation(activeRoute)">发送整条路线</button>
+            <button type="button" :disabled="connection !== 'connected'" @click="sendMessage({ type: 'navi-route-start' })">开始</button>
+            <button type="button" :disabled="connection !== 'connected'" @click="sendMessage({ type: 'navi-route-stop' })">暂停</button>
+            <button type="button" :disabled="connection !== 'connected'" @click="sendMessage({ type: 'navi-route-clear' })">清空服务端</button>
+          </div>
+          <small v-if="routeStatus" class="route-server-status">
+            服务端：{{ routeStatus.status || 'unknown' }} {{ routeStatus.currentIndex || 0 }}/{{ routeStatus.waypoints?.length || 0 }}
+          </small>
+          <div v-if="isAddingSegment" class="segment-editor">
+            <span>{{ editingSegment ? `正在编辑：${editingSegment.name}` : '新路段' }}：{{ segmentPoints.length }} 个点</span>
+            <button type="button" @click="undoRoutePoint">撤销</button>
+            <button type="button" @click="cancelSegment">取消</button>
+            <button type="button" :disabled="segmentPoints.length < 2" @click="finishSegment">{{ editingSegment ? '保存' : '完成' }}</button>
+          </div>
+          <button v-else class="add-segment-button" type="button" :disabled="isCompositeLayer" @click="startSegment">+ 添加路段</button>
+          <div class="segment-list">
+            <button
+              v-for="segment in activeRoute.segments"
+              :key="segment.id"
+              type="button"
+              :class="{ hidden: segment.isHidden }"
+              @click="toggleSegmentVisibility(segment)"
+            >
+              <span>{{ segment.name }}</span>
+              <small>{{ segment.isHidden ? '已隐藏' : `${getSegmentPoints(segment).length} 个点` }}</small>
+              <i @click.stop="sendSegmentToNavigation(segment)">发送</i>
+              <i @click.stop="editSegment(segment)">编辑</i>
+              <i @click.stop="deleteSegment(segment)">×</i>
+            </button>
+          </div>
+        </template>
       </aside>
     </div>
 

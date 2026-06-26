@@ -183,6 +183,7 @@ function formatComposite(composite) {
     ? composite.edges.map((edge) => ({
         from: escapeText(edge?.from),
         to: escapeText(edge?.to),
+        bidirectional: edge?.bidirectional === true,
         points: Array.isArray(edge?.points)
           ? edge.points.map((point) => ({ x: Number(point?.x), y: Number(point?.y) }))
           : [],
@@ -212,7 +213,8 @@ ${edges
     const points = edge.points.length
       ? `, points: [${edge.points.map((point) => `{ x: ${point.x}, y: ${point.y} }`).join(', ')}]`
       : ''
-    return `        { from: '${edge.from}', to: '${edge.to}'${points} },`
+    const bidirectional = edge.bidirectional ? ', bidirectional: true' : ''
+    return `        { from: '${edge.from}', to: '${edge.to}'${bidirectional}${points} },`
   })
   .join('\n')}
       ],`
