@@ -3,3 +3,4 @@ dist/
 *.log
 public/maps-origin
 public/process.py
+maps-source/
