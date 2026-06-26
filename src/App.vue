@@ -483,10 +483,16 @@ function setCompositeMarkerTypeHidden(type, hidden) {
   if (hidden) nextVisibility[type] = true
   else delete nextVisibility[type]
   hiddenCompositeMarkerTypes.value = nextVisibility
+
+  const nextHiddenMarkers = { ...hiddenCompositeMarkerIds.value }
   const nextShownMarkers = { ...shownCompositeMarkerIds.value }
   scopedCompositeMarkers.value
     .filter((marker) => getCompositeMarkerType(marker).id === type)
-    .forEach((marker) => delete nextShownMarkers[marker.id])
+    .forEach((marker) => {
+      delete nextHiddenMarkers[marker.id]
+      delete nextShownMarkers[marker.id]
+    })
+  hiddenCompositeMarkerIds.value = nextHiddenMarkers
   shownCompositeMarkerIds.value = nextShownMarkers
 }
 
@@ -530,10 +536,13 @@ function toggleCompositeMarkerVisibility(marker) {
 }
 
 function hideAllCompositeMarkers() {
-  hiddenCompositeMarkerIds.value = scopedCompositeMarkers.value.reduce((result, marker) => {
-    result[marker.id] = true
+  hiddenCompositeMarkerTypes.value = MARKER_TYPES.reduce((result, type) => {
+    result[type.id] = true
     return result
   }, {})
+  const nextHiddenMarkers = { ...hiddenCompositeMarkerIds.value }
+  scopedCompositeMarkers.value.forEach((marker) => delete nextHiddenMarkers[marker.id])
+  hiddenCompositeMarkerIds.value = nextHiddenMarkers
   shownCompositeMarkerIds.value = {}
 }
 
