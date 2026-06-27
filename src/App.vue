@@ -82,6 +82,7 @@ const HIDDEN_COMPOSITE_MARKER_IDS_STORAGE_KEY = 'pph-hidden-composite-marker-ids
 const SHOWN_COMPOSITE_MARKER_IDS_STORAGE_KEY = 'pph-shown-composite-marker-ids'
 const SIDEBAR_OPEN_STORAGE_KEY = 'pph-sidebar-open'
 const ROUTE_PANEL_OPEN_STORAGE_KEY = 'pph-route-panel-open'
+const MAP_VIEW_STORAGE_KEY = 'pph-map-views'
 const COMPOSITE_MARKER_ICON_SIZE = { width: 54, height: 38 }
 const COMPOSITE_EDGE_ARROW_TIP_OFFSET = 11
 const COMPOSITE_EDGE_ARROW_LENGTH = 24
@@ -215,6 +216,7 @@ let navigationDisplayAngle = null
 let transformPersistTimer = null
 let compositePersistTimer = null
 let suppressTransformPersist = false
+let suppressMapViewPersist = false
 let annotationBaseZoom = null
 let mapImageRenderToken = 0
 let compositeAnnotationFrame = null
@@ -233,6 +235,42 @@ function readStoredBoolean(storageKey, fallback) {
   if (value === 'true') return true
   if (value === 'false') return false
   return fallback
+}
+
+function readStoredMapViews() {
+  try {
+    const value = JSON.parse(localStorage.getItem(MAP_VIEW_STORAGE_KEY) || '{}')
+    return value && typeof value === 'object' && !Array.isArray(value) ? value : {}
+  } catch {
+    return {}
+  }
+}
+
+function normalizeStoredMapView(view) {
+  if (!view || typeof view !== 'object') return null
+  const lat = Number(view.lat)
+  const lng = Number(view.lng)
+  const zoom = Number(view.zoom)
+  if (![lat, lng, zoom].every(Number.isFinite)) return null
+  return { lat, lng, zoom }
+}
+
+function persistCurrentMapView(layerId = activeLayerId.value) {
+  if (!map || !map._loaded || suppressMapViewPersist) return
+  const center = map.getCenter()
+  const nextViews = {
+    ...readStoredMapViews(),
+    [layerId]: {
+      lat: Number(center.lat.toFixed(3)),
+      lng: Number(center.lng.toFixed(3)),
+      zoom: Number(map.getZoom().toFixed(3)),
+    },
+  }
+  localStorage.setItem(MAP_VIEW_STORAGE_KEY, JSON.stringify(nextViews))
+}
+
+function readStoredMapView(layerId = activeLayerId.value) {
+  return normalizeStoredMapView(readStoredMapViews()[layerId])
 }
 
 function createTransformForm(value = {}) {
@@ -1879,12 +1917,27 @@ function renderGeofence() {
 
 function resetView() {
   if (!map) return
+  suppressMapViewPersist = true
   map.fitBounds(activeViewBounds(), { padding: [30, 30], animate: false })
   if (activeLayerId.value === OVERVIEW_LAYER_ID) {
     map.setZoom(Math.min(map.getMaxZoom(), map.getZoom() + OVERVIEW_DEFAULT_ZOOM_OFFSET), { animate: false })
   }
+  suppressMapViewPersist = false
+  persistCurrentMapView()
   resetAnnotationScaleBase()
   renderCompositeAnnotations()
+}
+
+function restoreStoredView() {
+  if (!map) return false
+  const view = readStoredMapView()
+  if (!view) return false
+  suppressMapViewPersist = true
+  map.setView([view.lat, view.lng], Math.max(map.getMinZoom(), Math.min(map.getMaxZoom(), view.zoom)), { animate: false })
+  suppressMapViewPersist = false
+  resetAnnotationScaleBase()
+  renderCompositeAnnotations()
+  return true
 }
 
 function clearRoute() {
@@ -2536,6 +2589,7 @@ function persistNavigationEndpoint() {
 
 async function changeLayer(id, { preserveNavigation = false, manual = false } = {}) {
   if (id === activeLayerId.value) return
+  persistCurrentMapView()
   if (manual) {
     manualLayerView.value = id !== OVERVIEW_LAYER_ID
     if (id !== OVERVIEW_LAYER_ID) areaLayerListOpen.value = true
@@ -2565,7 +2619,7 @@ async function changeLayer(id, { preserveNavigation = false, manual = false } = 
     navigationCoordinateSource.value = 'none'
     renderNavigationMarker()
   }
-  resetView()
+  if (!restoreStoredView()) resetView()
 }
 
 watch(realtimeEnabled, (enabled) => {
@@ -2626,9 +2680,10 @@ onMounted(() => {
   map.on('zoomend moveend', () => {
     updateAnnotationScaleCss()
     scheduleCompositeAnnotationsRender()
+    persistCurrentMapView()
   })
   renderGeofence()
-  resetView()
+  if (!restoreStoredView()) resetView()
   if (realtimeEnabled.value) connectSocket()
 })
 
