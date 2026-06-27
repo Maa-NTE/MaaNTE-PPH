@@ -83,6 +83,9 @@ const SHOWN_COMPOSITE_MARKER_IDS_STORAGE_KEY = 'pph-shown-composite-marker-ids'
 const SIDEBAR_OPEN_STORAGE_KEY = 'pph-sidebar-open'
 const ROUTE_PANEL_OPEN_STORAGE_KEY = 'pph-route-panel-open'
 const MAP_VIEW_STORAGE_KEY = 'pph-map-views'
+const OVERVIEW_SCROLL_SPEED_STORAGE_KEY = 'pph-overview-scroll-speed'
+const OVERVIEW_SCROLL_DEFAULT_SPEED = 90
+const OVERVIEW_SCROLL_EDGE_PADDING_RATIO = 0.18
 const COMPOSITE_MARKER_ICON_SIZE = { width: 54, height: 38 }
 const COMPOSITE_EDGE_ARROW_TIP_OFFSET = 11
 const COMPOSITE_EDGE_ARROW_LENGTH = 24
@@ -125,6 +128,8 @@ const compositeItemDragMode = ref(false)
 const compositeMarkerMode = ref(false)
 const compositeConnectionMode = ref(false)
 const markerVisibilityPickMode = ref(false)
+const overviewScrollActive = ref(false)
+const overviewScrollSpeed = ref(readStoredNumber(OVERVIEW_SCROLL_SPEED_STORAGE_KEY, OVERVIEW_SCROLL_DEFAULT_SPEED))
 const compositeConnectionDirection = ref(
   localStorage.getItem('pph-composite-connection-direction') === 'two-way' ? 'two-way' : 'one-way',
 )
@@ -220,6 +225,9 @@ let suppressMapViewPersist = false
 let annotationBaseZoom = null
 let mapImageRenderToken = 0
 let compositeAnnotationFrame = null
+let overviewScrollFrame = null
+let overviewScrollLastTimestamp = null
+let overviewScrollTarget = null
 const mapTileImageCache = new Map()
 
 function readInitialActiveLayerId() {
@@ -235,6 +243,11 @@ function readStoredBoolean(storageKey, fallback) {
   if (value === 'true') return true
   if (value === 'false') return false
   return fallback
+}
+
+function readStoredNumber(storageKey, fallback) {
+  const value = Number(localStorage.getItem(storageKey))
+  return Number.isFinite(value) && value > 0 ? value : fallback
 }
 
 function readStoredMapViews() {
@@ -1917,6 +1930,7 @@ function renderGeofence() {
 
 function resetView() {
   if (!map) return
+  stopOverviewScroll()
   suppressMapViewPersist = true
   map.fitBounds(activeViewBounds(), { padding: [30, 30], animate: false })
   if (activeLayerId.value === OVERVIEW_LAYER_ID) {
@@ -1926,6 +1940,96 @@ function resetView() {
   persistCurrentMapView()
   resetAnnotationScaleBase()
   renderCompositeAnnotations()
+}
+
+function getOverviewScrollTarget() {
+  if (!map || !map._loaded || activeLayerId.value !== OVERVIEW_LAYER_ID) return null
+  const bounds = activeViewBounds()
+  const zoom = map.getZoom()
+  const size = map.getSize()
+  const northWest = map.project(bounds.getNorthWest(), zoom)
+  const southEast = map.project(bounds.getSouthEast(), zoom)
+  const halfWidth = size.x / 2
+  const halfHeight = size.y / 2
+  const edgePadding = size.y * OVERVIEW_SCROLL_EDGE_PADDING_RATIO
+  let startY = southEast.y - halfHeight + edgePadding
+  let endY = northWest.y + halfHeight - edgePadding
+  if (startY < endY) {
+    startY = (northWest.y + southEast.y) / 2
+    endY = startY
+  }
+  let centerX = map.project(map.getCenter(), zoom).x
+  const minX = northWest.x + halfWidth
+  const maxX = southEast.x - halfWidth
+  centerX = minX <= maxX
+    ? Math.max(minX, Math.min(maxX, centerX))
+    : (northWest.x + southEast.x) / 2
+  return { zoom, centerX, currentY: startY, endY }
+}
+
+function applyOverviewScrollPosition(target) {
+  if (!map || !target) return
+  const latlng = map.unproject(L.point(target.centerX, target.currentY), target.zoom)
+  map.setView(latlng, target.zoom, { animate: false })
+}
+
+function stepOverviewScroll(timestamp) {
+  if (!overviewScrollActive.value || !overviewScrollTarget || !map) return
+  if (overviewScrollLastTimestamp === null) overviewScrollLastTimestamp = timestamp
+  const elapsedSeconds = Math.max(0, (timestamp - overviewScrollLastTimestamp) / 1000)
+  overviewScrollLastTimestamp = timestamp
+  const speed = Math.max(1, Number(overviewScrollSpeed.value) || OVERVIEW_SCROLL_DEFAULT_SPEED)
+  overviewScrollTarget.currentY = Math.max(
+    overviewScrollTarget.endY,
+    overviewScrollTarget.currentY - speed * elapsedSeconds,
+  )
+  applyOverviewScrollPosition(overviewScrollTarget)
+  if (overviewScrollTarget.currentY <= overviewScrollTarget.endY) {
+    stopOverviewScroll()
+    showStatus('总览滚动已到顶部')
+    return
+  }
+  overviewScrollFrame = window.requestAnimationFrame(stepOverviewScroll)
+}
+
+function startOverviewScroll() {
+  if (!isDevelopment || !map || activeLayerId.value !== OVERVIEW_LAYER_ID) return
+  overviewScrollTarget = getOverviewScrollTarget()
+  if (!overviewScrollTarget) return
+  stopOverviewScroll({ preservePosition: true })
+  overviewScrollTarget = getOverviewScrollTarget()
+  if (!overviewScrollTarget) return
+  overviewScrollActive.value = true
+  overviewScrollLastTimestamp = null
+  suppressMapViewPersist = true
+  applyOverviewScrollPosition(overviewScrollTarget)
+  overviewScrollFrame = window.requestAnimationFrame(stepOverviewScroll)
+}
+
+function resetOverviewScrollStart() {
+  if (!isDevelopment || !map || activeLayerId.value !== OVERVIEW_LAYER_ID) return
+  stopOverviewScroll({ preservePosition: true })
+  overviewScrollTarget = getOverviewScrollTarget()
+  if (!overviewScrollTarget) return
+  suppressMapViewPersist = true
+  applyOverviewScrollPosition(overviewScrollTarget)
+  suppressMapViewPersist = false
+  overviewScrollTarget = null
+  showStatus('总览滚动起点已就位')
+}
+
+function stopOverviewScroll({ preservePosition = false } = {}) {
+  if (overviewScrollFrame !== null) {
+    window.cancelAnimationFrame(overviewScrollFrame)
+    overviewScrollFrame = null
+  }
+  overviewScrollActive.value = false
+  overviewScrollLastTimestamp = null
+  overviewScrollTarget = null
+  if (suppressMapViewPersist) {
+    suppressMapViewPersist = false
+    if (!preservePosition) persistCurrentMapView()
+  }
 }
 
 function restoreStoredView() {
@@ -2590,6 +2694,7 @@ function persistNavigationEndpoint() {
 
 async function changeLayer(id, { preserveNavigation = false, manual = false } = {}) {
   if (id === activeLayerId.value) return
+  stopOverviewScroll()
   persistCurrentMapView()
   map.setMaxBounds(null)
   if (manual) {
@@ -2634,6 +2739,10 @@ watch([navigationProtocol, navigationHost, navigationPort], persistNavigationEnd
 watch(sidebarOpen, (open) => localStorage.setItem(SIDEBAR_OPEN_STORAGE_KEY, String(open)))
 watch(routePanelOpen, (open) => localStorage.setItem(ROUTE_PANEL_OPEN_STORAGE_KEY, String(open)))
 watch(areaLayerListOpen, (open) => localStorage.setItem('pph-area-layer-list-open', String(open)))
+watch(overviewScrollSpeed, (speed) => {
+  const normalized = Math.max(1, Number(speed) || OVERVIEW_SCROLL_DEFAULT_SPEED)
+  localStorage.setItem(OVERVIEW_SCROLL_SPEED_STORAGE_KEY, String(normalized))
+})
 watch(compositeConnectionDirection, (direction) => localStorage.setItem('pph-composite-connection-direction', direction))
 watch(hiddenCompositeMarkerTypes, (visibility) => {
   persistCompositeMarkerVisibility(HIDDEN_COMPOSITE_MARKER_TYPES_STORAGE_KEY, visibility)
@@ -2691,6 +2800,7 @@ onMounted(() => {
 
 onUnmounted(() => {
   stopped = true
+  stopOverviewScroll({ preservePosition: true })
   if (transformPersistTimer) window.clearTimeout(transformPersistTimer)
   if (compositePersistTimer) window.clearTimeout(compositePersistTimer)
   if (compositeAnnotationFrame !== null) window.cancelAnimationFrame(compositeAnnotationFrame)
@@ -2915,6 +3025,36 @@ onUnmounted(() => {
               <span>Offset Z</span>
               <input v-model.number="transformForm.offsetZ" type="number" step="any" />
             </label>
+          </div>
+        </div>
+
+        <div v-if="isDevelopment && isCompositeLayer" class="overview-scroll-panel">
+          <div class="calibration-panel__heading">
+            <span>
+              <b>总览录制滚动</b>
+              <small>保持当前缩放，从底部匀速移动到顶部</small>
+            </span>
+            <i>{{ overviewScrollActive ? 'REC' : 'DEV' }}</i>
+          </div>
+
+          <label class="overview-scroll-speed">
+            <span>速度</span>
+            <input v-model.number="overviewScrollSpeed" type="number" min="1" step="5" />
+            <em>px/s</em>
+          </label>
+
+          <div class="calibration-actions">
+            <button
+              v-if="!overviewScrollActive"
+              type="button"
+              @click="startOverviewScroll"
+            >
+              开始滚动
+            </button>
+            <button v-else type="button" @click="stopOverviewScroll">
+              停止滚动
+            </button>
+            <button type="button" @click="resetOverviewScrollStart">回到底部起点</button>
           </div>
         </div>
 
