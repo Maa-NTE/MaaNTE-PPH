@@ -761,7 +761,7 @@ export const MAP_LAYERS = [
       ],
       markers: [
         { id: 'mmqubz99p', label: '前往W1', type: 'portal', layerId: 'lobby-lower', x: 2064, y: 1408 },
-        { id: 'mmquca68s', label: '前往大厅', type: 'portal', layerId: 'g1-office', x: 4440, y: 3980 },
+        { id: 'mmquca68s', label: 'W1电梯', type: 'portal', layerId: 'g1-office', x: 4440, y: 3980 },
         { id: 'mmquz6jk7', label: '蓝色传送门', type: 'portal', layerId: 'g1-office-left-room', x: 3664, y: 1960 },
         { id: 'mmquz88i6', label: '前往W2', type: 'portal', layerId: 'g1-office', x: 2198, y: 1520 },
         { id: 'mmquzb2ny', label: '前往W2', type: 'portal', layerId: 'g1-office', x: 6694, y: 1537 },
