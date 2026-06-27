@@ -1932,6 +1932,7 @@ function restoreStoredView() {
   if (!map) return false
   const view = readStoredMapView()
   if (!view) return false
+  if (!activeViewBounds().pad(0.45).contains([view.lat, view.lng])) return false
   suppressMapViewPersist = true
   map.setView([view.lat, view.lng], Math.max(map.getMinZoom(), Math.min(map.getMaxZoom(), view.zoom)), { animate: false })
   suppressMapViewPersist = false
@@ -2590,6 +2591,7 @@ function persistNavigationEndpoint() {
 async function changeLayer(id, { preserveNavigation = false, manual = false } = {}) {
   if (id === activeLayerId.value) return
   persistCurrentMapView()
+  map.setMaxBounds(null)
   if (manual) {
     manualLayerView.value = id !== OVERVIEW_LAYER_ID
     if (id !== OVERVIEW_LAYER_ID) areaLayerListOpen.value = true
@@ -2599,7 +2601,6 @@ async function changeLayer(id, { preserveNavigation = false, manual = false } = 
   localStorage.setItem('pph-active-layer', id)
   await nextTick()
   renderMapImages()
-  map.setMaxBounds(activeViewBounds().pad(0.45))
   routeEditMode.value = false
   compositeMarkerMode.value = false
   compositeItemDragMode.value = false
@@ -2620,6 +2621,7 @@ async function changeLayer(id, { preserveNavigation = false, manual = false } = 
     renderNavigationMarker()
   }
   if (!restoreStoredView()) resetView()
+  map.setMaxBounds(activeViewBounds().pad(0.45))
 }
 
 watch(realtimeEnabled, (enabled) => {
